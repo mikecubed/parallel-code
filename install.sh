@@ -4,6 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OS="$(uname -s)"
 
+# Treat WSL as Linux so the standard Linux build path is used
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    OS="Linux"
+fi
+
 cd "$SCRIPT_DIR"
 
 case "$OS" in
