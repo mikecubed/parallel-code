@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -6,6 +6,7 @@ import { execFileSync } from 'child_process';
 import { registerAllHandlers } from './ipc/register.js';
 import { killAllAgents } from './ipc/pty.js';
 import { IPC } from './ipc/channels.js';
+import { detectWsl } from './lib/wsl.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,7 +24,16 @@ const __dirname = path.dirname(__filename);
 // that are only added to PATH in .bashrc/.zshrc (e.g. nvm). We accept the
 // side effects since the sentinel-based parsing discards all other output.
 function fixPath(): void {
-  if (process.platform === 'win32') return;
+  if (process.platform === 'win32') {
+    const wsl = detectWsl();
+    if (wsl.available) {
+      process.env.WSL_DISTRO = wsl.distro;
+      // WSL_PATH is set as a side effect of detectWsl() when available
+    } else {
+      process.env.WSL_DISTRO = '';
+    }
+    return;
+  }
   try {
     const loginShell = process.env.SHELL || '/bin/sh';
     const sentinel = '__PCODE_PATH__';
@@ -41,6 +51,21 @@ function fixPath(): void {
 }
 
 fixPath();
+
+// On Windows, require WSL2 — show a clear dialog and quit if absent.
+if (process.platform === 'win32' && !process.env.WSL_DISTRO) {
+  app.whenReady().then(async () => {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'WSL2 Required',
+      message: 'Parallel Code requires Windows Subsystem for Linux 2 (WSL2).',
+      detail:
+        'WSL2 was not detected on this system. Please install WSL2 and a Linux distribution, then relaunch Parallel Code.\n\nVisit: https://aka.ms/wsl2 for installation instructions.',
+      buttons: ['OK'],
+    });
+    app.quit();
+  });
+}
 
 // Verify that preload.cjs ALLOWED_CHANNELS stays in sync with the IPC enum.
 // Logs a warning in dev if they drift — catches mismatches before they hit users.

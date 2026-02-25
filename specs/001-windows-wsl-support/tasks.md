@@ -18,9 +18,9 @@
 
 **Purpose**: Create the new helper module and icon asset; amend the constitution.
 
-- [ ] T001 Create `electron/lib/` directory and stub `electron/lib/wsl.ts` with exported empty functions `detectWsl()` and `toWslPath()` so downstream modules can import without error
-- [ ] T002 [P] Add `build/icon.ico` placeholder (256×256 multi-resolution ICO) for the Windows installer — must exist before electron-builder Win32 config is added
-- [ ] T003 [P] Amend `.specify/memory/constitution.md` Principle V to permit WSL2-gated Windows support; bump version to 2.0.0 and update `LAST_AMENDED_DATE`
+- [X] T001 Create `electron/lib/` directory and stub `electron/lib/wsl.ts` with exported empty functions `detectWsl()` and `toWslPath()` so downstream modules can import without error
+- [X] T002 [P] Add `build/icon.ico` placeholder (256×256 multi-resolution ICO) for the Windows installer — must exist before electron-builder Win32 config is added
+- [X] T003 [P] Amend `.specify/memory/constitution.md` Principle V to permit WSL2-gated Windows support; bump version to 2.0.0 and update `LAST_AMENDED_DATE`
 
 ---
 
@@ -30,10 +30,10 @@
 
 **⚠️ CRITICAL**: All Phase 3–6 tasks import from `electron/lib/wsl.ts`. This phase must be complete first.
 
-- [ ] T004 Implement `detectWsl()` in `electron/lib/wsl.ts` — runs `wsl.exe --version` (5 s timeout) to confirm WSL2 presence, then `wsl.exe --list --verbose` to extract the default distro name; returns `{ available: boolean; distro: string }` with full strict TypeScript types; catches all errors and returns `{ available: false, distro: '' }` on failure
-- [ ] T005 Implement `toWslPath(winPath: string): string` in `electron/lib/wsl.ts` — converts `C:\Users\alice\project` → `/mnt/c/Users/alice/project` using drive-letter regex + backslash replacement; returns POSIX paths unchanged; throw a typed error for unrecognised input
-- [ ] T006 [P] Write Vitest unit tests for `toWslPath()` in `src/store/` (or nearest test co-location) — test Windows paths, already-POSIX paths, paths with spaces, UNC inputs; tests must pass on Linux CI without a real `wsl.exe`
-- [ ] T007 [P] Extend `detectWsl()` to also resolve the WSL login-shell PATH via `wsl.exe -d <distro> bash -ilc 'printf "__P__%s__P__" "$PATH"'` and cache it in `process.env.WSL_PATH`; sentinel-parse the output as in `port/windows-native-approach.md`
+- [X] T004 Implement `detectWsl()` in `electron/lib/wsl.ts` — runs `wsl.exe --version` (5 s timeout) to confirm WSL2 presence, then `wsl.exe --list --verbose` to extract the default distro name; returns `{ available: boolean; distro: string }` with full strict TypeScript types; catches all errors and returns `{ available: false, distro: '' }` on failure
+- [X] T005 Implement `toWslPath(winPath: string): string` in `electron/lib/wsl.ts` — converts `C:\Users\alice\project` → `/mnt/c/Users/alice/project` using drive-letter regex + backslash replacement; returns POSIX paths unchanged; throw a typed error for unrecognised input
+- [X] T006 [P] Write Vitest unit tests for `toWslPath()` in `src/store/` (or nearest test co-location) — test Windows paths, already-POSIX paths, paths with spaces, UNC inputs; tests must pass on Linux CI without a real `wsl.exe`
+- [X] T007 [P] Extend `detectWsl()` to also resolve the WSL login-shell PATH via `wsl.exe -d <distro> bash -ilc 'printf "__P__%s__P__" "$PATH"'` and cache it in `process.env.WSL_PATH`; sentinel-parse the output as in `port/windows-native-approach.md`
 
 **Checkpoint**: `electron/lib/wsl.ts` is complete, typed, tested. All exports ready for consumers.
 
@@ -47,10 +47,10 @@
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Update `fixPath()` in `electron/main.ts` — on `win32`, call `detectWsl()` from `electron/lib/wsl.ts`; if WSL2 available, store `process.env.WSL_DISTRO` and `process.env.WSL_PATH`; if unavailable, store `process.env.WSL_DISTRO = ''`; guard the entire block with `process.platform === 'win32'`; leave POSIX branch untouched
-- [ ] T009 [US1] Add a startup WSL2 guard in `electron/main.ts` — after `fixPath()`, if `process.platform === 'win32'` and `process.env.WSL_DISTRO` is empty, show an Electron `dialog.showMessageBox` with a clear explanation and a link to the WSL2 install page, then call `app.quit()`; no crash, no hang
-- [ ] T010 [P] [US1] Add `win` and `nsis` build targets to `package.json` `build` section — `{ "target": "nsis", "arch": ["x64", "arm64"] }`, `"icon": "build/icon.ico"`, `nsis: { "oneClick": false, "allowToChangeInstallationDirectory": true }`; verify existing `asarUnpack` entry covers node-pty
-- [ ] T011 [P] [US1] Add WSL detection branch to `install.sh` — detect `/proc/version` containing `microsoft`; set `OS="Linux"` and continue with the Linux install path; print `"WSL detected — using Linux build path"`
+- [X] T008 [US1] Update `fixPath()` in `electron/main.ts` — on `win32`, call `detectWsl()` from `electron/lib/wsl.ts`; if WSL2 available, store `process.env.WSL_DISTRO` and `process.env.WSL_PATH`; if unavailable, store `process.env.WSL_DISTRO = ''`; guard the entire block with `process.platform === 'win32'`; leave POSIX branch untouched
+- [X] T009 [US1] Add a startup WSL2 guard in `electron/main.ts` — after `fixPath()`, if `process.platform === 'win32'` and `process.env.WSL_DISTRO` is empty, show an Electron `dialog.showMessageBox` with a clear explanation and a link to the WSL2 install page, then call `app.quit()`; no crash, no hang
+- [X] T010 [P] [US1] Add `win` and `nsis` build targets to `package.json` `build` section — `{ "target": "nsis", "arch": ["x64", "arm64"] }`, `"icon": "build/icon.ico"`, `nsis: { "oneClick": false, "allowToChangeInstallationDirectory": true }`; verify existing `asarUnpack` entry covers node-pty
+- [X] T011 [P] [US1] Add WSL detection branch to `install.sh` — detect `/proc/version` containing `microsoft`; set `OS="Linux"` and continue with the Linux install path; print `"WSL detected — using Linux build path"`
 
 **Checkpoint**: On Windows with WSL2 → app opens. Without WSL2 → dialog shown. macOS/Linux tests still pass (`npm run check && npm run test`).
 
@@ -64,10 +64,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Update `spawnAgent()` in `electron/ipc/pty.ts` — on `win32`, prepend `wsl.exe` as the executable and pass `['--', command, ...args.args]`; use `toWslPath(args.cwd)` from `electron/lib/wsl.ts` to translate the working directory; leave POSIX spawn path untouched; no `any` types
-- [ ] T013 [US2] Add a `win32` shell fallback in `electron/ipc/pty.ts` — if `process.env.SHELL` is unset on Windows (it will be), default the shell to `bash` (resolved through WSL); remove the `|| '/bin/sh'` fallback from the Windows code path since it doesn't exist natively
-- [ ] T014 [US2] Verify terminal resize path in `electron/ipc/pty.ts` — confirm `pty.resize(cols, rows)` is called unconditionally (it already invokes `ResizePseudoConsole` on Windows via ConPTY); add a guard that `cols >= 1` and `rows >= 1` before calling resize (node-pty issue #877)
-- [ ] T015 [US2] Update `electron/ipc/register.ts` `validatePath()` — add Win32 absolute path acceptance: `path.isAbsolute(p) || (process.platform === 'win32' && /^[A-Za-z]:[/\\]/.test(p))`; keep the `..` traversal check; add `validateRelativePath` Win32 guard if needed
+- [X] T012 [US2] Update `spawnAgent()` in `electron/ipc/pty.ts` — on `win32`, prepend `wsl.exe` as the executable and pass `['--', command, ...args.args]`; use `toWslPath(args.cwd)` from `electron/lib/wsl.ts` to translate the working directory; leave POSIX spawn path untouched; no `any` types
+- [X] T013 [US2] Add a `win32` shell fallback in `electron/ipc/pty.ts` — if `process.env.SHELL` is unset on Windows (it will be), default the shell to `bash` (resolved through WSL); remove the `|| '/bin/sh'` fallback from the Windows code path since it doesn't exist natively
+- [X] T014 [US2] Verify terminal resize path in `electron/ipc/pty.ts` — confirm `pty.resize(cols, rows)` is called unconditionally (it already invokes `ResizePseudoConsole` on Windows via ConPTY); add a guard that `cols >= 1` and `rows >= 1` before calling resize (node-pty issue #877)
+- [X] T015 [US2] Update `electron/ipc/register.ts` `validatePath()` — add Win32 absolute path acceptance: `path.isAbsolute(p) || (process.platform === 'win32' && /^[A-Za-z]:[/\\]/.test(p))`; keep the `..` traversal check; add `validateRelativePath` Win32 guard if needed
 
 **Checkpoint**: Terminal panels open on Windows; PTY sessions run inside WSL2; resize works; existing macOS/Linux PTY tests are unaffected.
 
@@ -81,10 +81,10 @@
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] Wrap all `exec('git', …)` calls in `electron/ipc/git.ts` with a `win32` delegation helper — on Windows, replace `exec('git', args, { cwd })` with `exec('wsl.exe', ['git', ...args], { cwd: toWslPath(cwd) })`; extract a private `gitExec(args, cwd)` helper that encapsulates this branching so all ~12 call sites become one-liners
-- [ ] T017 [US3] Add path normalisation in `electron/ipc/git.ts` — after `wsl.exe git` calls that return file paths (e.g. `getChangedFiles`, `getWorktreeStatus`), strip any `/mnt/c/` prefix and re-emit as Windows paths if the consumer expects Windows paths; document in code comments which functions return which path shape
-- [ ] T018 [US3] Add a Windows-mounted-drive warning in `electron/ipc/tasks.ts` (or `git.ts`) — before `createWorktree()`, if `process.platform === 'win32'` and `projectRoot` starts with `/mnt/`, log a console warning and surface it to the renderer via a resolved value flag (e.g. `{ path, branch, warnMountedDrive: true }`); update the `createTask` IPC handler in `register.ts` to pass the flag back to the renderer
-- [ ] T019 [P] [US3] Update the `createTask` IPC response type in `electron/ipc/channels.ts` or the relevant type file — add optional `warnMountedDrive?: boolean` to the return shape so the renderer can display a warning toast; update the renderer-side `invoke` call type accordingly in `src/lib/ipc.ts`
+- [X] T016 [US3] Wrap all `exec('git', …)` calls in `electron/ipc/git.ts` with a `win32` delegation helper — on Windows, replace `exec('git', args, { cwd })` with `exec('wsl.exe', ['git', ...args], { cwd: toWslPath(cwd) })`; extract a private `gitExec(args, cwd)` helper that encapsulates this branching so all ~12 call sites become one-liners
+- [X] T017 [US3] Add path normalisation in `electron/ipc/git.ts` — after `wsl.exe git` calls that return file paths (e.g. `getChangedFiles`, `getWorktreeStatus`), strip any `/mnt/c/` prefix and re-emit as Windows paths if the consumer expects Windows paths; document in code comments which functions return which path shape
+- [X] T018 [US3] Add a Windows-mounted-drive warning in `electron/ipc/tasks.ts` (or `git.ts`) — before `createWorktree()`, if `process.platform === 'win32'` and `projectRoot` starts with `/mnt/`, log a console warning and surface it to the renderer via a resolved value flag (e.g. `{ path, branch, warnMountedDrive: true }`); update the `createTask` IPC handler in `register.ts` to pass the flag back to the renderer
+- [X] T019 [P] [US3] Update the `createTask` IPC response type in `electron/ipc/channels.ts` or the relevant type file — add optional `warnMountedDrive?: boolean` to the return shape so the renderer can display a warning toast; update the renderer-side `invoke` call type accordingly in `src/lib/ipc.ts`
 
 **Checkpoint**: Worktrees created and deleted on Windows; symlinks work in WSL-native storage; mounted-drive warning surfaced to UI; macOS/Linux behavior unchanged.
 
@@ -98,8 +98,8 @@
 
 ### Implementation for User Story 4
 
-- [ ] T020 [US4] Audit `electron/ipc/agents.ts` for any hardcoded POSIX-only assumptions (e.g. path construction, env var names) and apply `win32` guards or `toWslPath()` where needed; document any agent CLI that requires WSL2 installation instructions
-- [ ] T021 [US4] Update `electron/ipc/pty.ts` `spawnEnv` construction — on `win32`, merge `process.env.WSL_PATH` into the `PATH` passed to the WSL PTY so agent CLIs installed in the WSL distro are discoverable; preserve the existing `delete spawnEnv.CLAUDECODE` / session-env cleanup logic
+- [X] T020 [US4] Audit `electron/ipc/agents.ts` for any hardcoded POSIX-only assumptions (e.g. path construction, env var names) and apply `win32` guards or `toWslPath()` where needed; document any agent CLI that requires WSL2 installation instructions
+- [X] T021 [US4] Update `electron/ipc/pty.ts` `spawnEnv` construction — on `win32`, merge `process.env.WSL_PATH` into the `PATH` passed to the WSL PTY so agent CLIs installed in the WSL distro are discoverable; preserve the existing `delete spawnEnv.CLAUDECODE` / session-env cleanup logic
 
 **Checkpoint**: Agent tasks run end-to-end on Windows; streaming output renders correctly; stop/kill works.
 
@@ -109,9 +109,9 @@
 
 **Purpose**: Final validation, docs, and quality gates.
 
-- [ ] T022 [P] Update `README.md` — add a "Windows (via WSL2)" section to the installation instructions, referencing `quickstart.md` for dev setup and noting WSL2 is required
-- [ ] T023 [P] Update `CLAUDE.md` — add Windows platform notes: WSL2 required, repos should live in WSL-native storage, `electron/lib/wsl.ts` is the platform helper
-- [ ] T024 Run full quality gates: `npm run check` (typecheck + lint + format:check) and `npm run test` — fix any regressions introduced by this feature; lint budget must stay ≤ 21 warnings
+- [X] T022 [P] Update `README.md` — add a "Windows (via WSL2)" section to the installation instructions, referencing `quickstart.md` for dev setup and noting WSL2 is required
+- [X] T023 [P] Update `CLAUDE.md` — add Windows platform notes: WSL2 required, repos should live in WSL-native storage, `electron/lib/wsl.ts` is the platform helper
+- [X] T024 Run full quality gates: `npm run check` (typecheck + lint + format:check) and `npm run test` — fix any regressions introduced by this feature; lint budget must stay ≤ 21 warnings
 - [ ] T025 Manual smoke test on Windows per `specs/001-windows-wsl-support/quickstart.md` — cover all four scenarios: WSL2 present/absent, terminal spawn, worktree create/delete, agent task
 
 ---

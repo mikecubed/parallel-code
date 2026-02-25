@@ -19,6 +19,7 @@ export interface CreateTaskResult {
   id: string;
   branch_name: string;
   worktree_path: string;
+  warnMountedDrive?: boolean;
 }
 
 export interface TaskInfo {

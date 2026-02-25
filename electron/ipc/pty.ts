@@ -1,6 +1,7 @@
 import * as pty from 'node-pty';
 import type { BrowserWindow } from 'electron';
 import { RingBuffer } from '../remote/ring-buffer.js';
+import { toWslPath } from '../lib/wsl.js';
 
 interface PtySession {
   proc: pty.IPty;
@@ -58,8 +59,25 @@ export function spawnAgent(
   },
 ): void {
   const channelId = args.onOutput.__CHANNEL_ID__;
-  const command = args.command || process.env.SHELL || '/bin/sh';
-  const cwd = args.cwd || process.env.HOME || '/';
+
+  // On Windows, delegate to WSL2 via wsl.exe; shell defaults to bash since
+  // SHELL is not set in the Windows environment.
+  let command: string;
+  let spawnArgs: string[];
+  let cwd: string;
+
+  if (process.platform === 'win32') {
+    command = 'wsl.exe';
+    const innerCommand = args.command || 'bash';
+    // Use --cd to set the WSL working directory from the translated path
+    const wslCwd = toWslPath(args.cwd || process.env.HOME || '/');
+    spawnArgs = ['--cd', wslCwd, '--', innerCommand, ...args.args];
+    cwd = args.cwd || process.env.HOME || '/';
+  } else {
+    command = args.command || process.env.SHELL || '/bin/sh';
+    spawnArgs = args.args;
+    cwd = args.cwd || process.env.HOME || '/';
+  }
 
   // Reject commands with shell metacharacters (node-pty uses execvp, but
   // guard against accidental misuse). Allow bare names (resolved via PATH)
@@ -98,12 +116,18 @@ export function spawnAgent(
     ...safeEnvOverrides,
   };
 
+  // On Windows, merge WSL_PATH into PATH so agent CLIs installed in the WSL
+  // distro are discoverable inside the PTY session.
+  if (process.platform === 'win32' && process.env.WSL_PATH) {
+    spawnEnv.PATH = process.env.WSL_PATH;
+  }
+
   // Clear env vars that prevent nested agent sessions
   delete spawnEnv.CLAUDECODE;
   delete spawnEnv.CLAUDE_CODE_SESSION;
   delete spawnEnv.CLAUDE_CODE_ENTRYPOINT;
 
-  const proc = pty.spawn(command, args.args, {
+  const proc = pty.spawn(command, spawnArgs, {
     name: 'xterm-256color',
     cols: args.cols,
     rows: args.rows,
@@ -213,7 +237,10 @@ export function writeToAgent(agentId: string, data: string): void {
 export function resizeAgent(agentId: string, cols: number, rows: number): void {
   const session = sessions.get(agentId);
   if (!session) throw new Error(`Agent not found: ${agentId}`);
-  session.proc.resize(cols, rows);
+  // Guard against zero/negative dimensions (node-pty issue #877)
+  if (cols >= 1 && rows >= 1) {
+    session.proc.resize(cols, rows);
+  }
 }
 
 export function pauseAgent(agentId: string): void {

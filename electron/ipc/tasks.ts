@@ -33,14 +33,22 @@ export async function createTask(
   projectRoot: string,
   symlinkDirs: string[],
   branchPrefix: string,
-): Promise<{ id: string; branch_name: string; worktree_path: string }> {
+): Promise<{ id: string; branch_name: string; worktree_path: string; warnMountedDrive?: boolean }> {
   const prefix = sanitizeBranchPrefix(branchPrefix);
   const branchName = `${prefix}/${slug(name)}`;
   const worktree = await createWorktree(projectRoot, branchName, symlinkDirs);
+
+  // On Windows, paths from the renderer are Windows-native (e.g. C:\Users\...).
+  // Any Windows-native path maps to a /mnt/X/... WSL mount path, which has
+  // 10-50× slower git I/O and requires Developer Mode for symlinks.
+  // WSL-native paths (e.g. /home/alice/...) arrive as POSIX and don't match.
+  const warnMountedDrive = process.platform === 'win32' && /^[A-Za-z]:[/\\]/.test(projectRoot);
+
   return {
     id: randomUUID(),
     branch_name: worktree.branch,
     worktree_path: worktree.path,
+    ...(warnMountedDrive && { warnMountedDrive: true }),
   };
 }
 

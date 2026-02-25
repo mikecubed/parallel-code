@@ -1,11 +1,11 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (new) → 1.0.0
-Added sections: Core Principles (I–V), Technology Stack, Development Workflow, Governance
-Removed sections: N/A (initial ratification)
+Version change: 1.0.0 → 2.0.0
+Changed sections: Principle V — Platform Focus (BREAKING: Windows now permitted via WSL2)
+Removed sections: N/A
 Templates requiring updates:
-  ✅ .specify/templates/plan-template.md — Constitution Check gates align with principles below
+  ✅ .specify/templates/plan-template.md — Constitution Check gates align with updated Principle V
   ✅ .specify/templates/spec-template.md — no changes required; spec format is principle-agnostic
   ✅ .specify/templates/tasks-template.md — no changes required; task structure is principle-agnostic
 Follow-up TODOs: None
@@ -34,6 +34,7 @@ channel enum defined in `electron/ipc/channels.ts` — the single source of trut
 channel names.
 
 Rules:
+
 - New channels MUST be added to the `IPC` enum first, then registered in
   `electron/ipc/register.ts`, allowlisted in `electron/preload.cjs`, and called via
   `invoke<T>(IPC.Channel, args)` from `src/lib/ipc.ts`.
@@ -72,16 +73,19 @@ any circumstance, including "quick fixes" or "trivial changes".
 **Rationale**: The gates exist because each check catches a different class of defect.
 Skipping one in a hurry is how regressions ship to end users who cannot hotfix easily.
 
-### V. Platform Focus — macOS and Linux Only
+### V. Platform Focus — macOS, Linux, and Windows (via WSL2)
 
-Parallel Code targets macOS and Linux exclusively. Windows MUST NOT be supported.
-Platform-specific behavior (PTY handling, file paths, shell detection) MUST be isolated
-to dedicated modules and clearly documented. No platform-detection hacks scattered
-through business logic.
+Parallel Code targets macOS, Linux, and Windows (via WSL2). Windows support MUST be
+gated exclusively behind `process.platform === 'win32'` checks — POSIX code paths MUST
+be 100% untouched. All WSL2 interaction MUST be encapsulated in `electron/lib/wsl.ts`
+— no inline `wsl.exe` calls in other modules. Windows requires WSL2; if absent, the app
+MUST show a clear dialog and quit gracefully. Repos SHOULD live in WSL-native storage
+(`/home/…`) to avoid cross-filesystem performance penalties and symlink restrictions.
 
-**Rationale**: Maintaining three platforms with a two-process Electron + PTY architecture
-adds disproportionate complexity for a tool aimed at developers already on unix-like
-systems. Scope focus enables higher quality on supported platforms.
+**Rationale**: WSL2 provides a clean POSIX layer for Windows, keeping implementation
+complexity manageable and the POSIX code paths fully intact. All platform-specific
+branching is isolated to `electron/lib/wsl.ts` and the consumer modules that guard it
+with `process.platform === 'win32'`.
 
 ## Technology Stack
 
@@ -117,6 +121,7 @@ Conflicts between this document and other guidance files MUST be resolved in fav
 the constitution.
 
 **Amendment procedure**:
+
 1. Open a PR with proposed changes to `.specify/memory/constitution.md`.
 2. Bump `CONSTITUTION_VERSION` according to semantic versioning rules defined in the
    speckit tooling (MAJOR for breaking governance changes, MINOR for additions,
@@ -132,4 +137,4 @@ description with a documented rationale and a plan to remediate.
 Use `CLAUDE.md` for runtime agent guidance. Use this constitution for durable engineering
 principles.
 
-**Version**: 1.0.0 | **Ratified**: 2026-02-25 | **Last Amended**: 2026-02-25
+**Version**: 2.0.0 | **Ratified**: 2026-02-25 | **Last Amended**: 2026-02-25

@@ -1,6 +1,6 @@
 # Copilot Instructions
 
-Electron desktop app — SolidJS frontend, Node.js backend. macOS and Linux only (no Windows support).
+Electron desktop app — SolidJS frontend, Node.js backend. macOS, Linux, and Windows (via WSL2).
 
 ## Commands
 

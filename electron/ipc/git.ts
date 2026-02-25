@@ -2,8 +2,36 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import { toWslPath } from '../lib/wsl.js';
 
-const exec = promisify(execFile);
+const execFileRaw = promisify(execFile);
+
+const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
+
+/**
+ * Execute a git command, delegating through wsl.exe on Windows so that git
+ * runs inside the WSL2 distro rather than Windows git.
+ * All call sites that previously used `exec('git', args, { cwd })` should use
+ * this helper instead.
+ */
+async function gitExec(
+  args: string[],
+  options?: { cwd?: string; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
+  const cwd = options?.cwd;
+  const maxBuffer = options?.maxBuffer ?? MAX_BUFFER;
+
+  if (process.platform === 'win32') {
+    const wslCwd = cwd ? toWslPath(cwd) : undefined;
+    return execFileRaw('wsl.exe', ['git', ...args], {
+      cwd: wslCwd,
+      maxBuffer,
+      encoding: 'utf8',
+    });
+  }
+
+  return execFileRaw('git', args, { cwd, maxBuffer, encoding: 'utf8' });
+}
 
 // --- TTL Caches ---
 
@@ -16,7 +44,6 @@ const mainBranchCache = new Map<string, CacheEntry>();
 const mergeBaseCache = new Map<string, CacheEntry>();
 const MAIN_BRANCH_TTL = 60_000; // 60s
 const MERGE_BASE_TTL = 30_000; // 30s
-const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 
 function invalidateMergeBaseCache(): void {
   mergeBaseCache.clear();
@@ -71,7 +98,7 @@ async function detectMainBranch(repoRoot: string): Promise<string> {
 async function detectMainBranchUncached(repoRoot: string): Promise<string> {
   // Try remote HEAD reference first
   try {
-    const { stdout } = await exec('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+    const { stdout } = await gitExec(['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: repoRoot,
     });
     const refname = stdout.trim();
@@ -83,7 +110,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 
   // Check if 'main' exists
   try {
-    await exec('git', ['rev-parse', '--verify', 'main'], { cwd: repoRoot });
+    await gitExec(['rev-parse', '--verify', 'main'], { cwd: repoRoot });
     return 'main';
   } catch {
     /* ignore */
@@ -91,7 +118,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 
   // Fallback to 'master'
   try {
-    await exec('git', ['rev-parse', '--verify', 'master'], { cwd: repoRoot });
+    await gitExec(['rev-parse', '--verify', 'master'], { cwd: repoRoot });
     return 'master';
   } catch {
     /* ignore */
@@ -99,7 +126,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 
   // Empty repo (no commits yet) — use configured default branch or fall back to "main"
   try {
-    const { stdout } = await exec('git', ['config', '--get', 'init.defaultBranch'], {
+    const { stdout } = await gitExec(['config', '--get', 'init.defaultBranch'], {
       cwd: repoRoot,
     });
     const configured = stdout.trim();
@@ -112,7 +139,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 }
 
 async function getCurrentBranchName(repoRoot: string): Promise<string> {
-  const { stdout } = await exec('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: repoRoot });
+  const { stdout } = await gitExec(['symbolic-ref', '--short', 'HEAD'], { cwd: repoRoot });
   return stdout.trim();
 }
 
@@ -124,7 +151,7 @@ async function detectMergeBase(repoRoot: string): Promise<string> {
   const mainBranch = await detectMainBranch(repoRoot);
   let result: string;
   try {
-    const { stdout } = await exec('git', ['merge-base', mainBranch, 'HEAD'], { cwd: repoRoot });
+    const { stdout } = await gitExec(['merge-base', mainBranch, 'HEAD'], { cwd: repoRoot });
     const hash = stdout.trim();
     result = hash || mainBranch;
   } catch {
@@ -136,7 +163,7 @@ async function detectMergeBase(repoRoot: string): Promise<string> {
 }
 
 async function detectRepoLockKey(p: string): Promise<string> {
-  const { stdout } = await exec('git', ['rev-parse', '--git-common-dir'], { cwd: p });
+  const { stdout } = await gitExec(['rev-parse', '--git-common-dir'], { cwd: p });
   const commonDir = stdout.trim();
   const commonPath = path.isAbsolute(commonDir) ? commonDir : path.join(p, commonDir);
   try {
@@ -187,7 +214,7 @@ async function computeBranchDiffStats(
   mainBranch: string,
   branchName: string,
 ): Promise<{ linesAdded: number; linesRemoved: number }> {
-  const { stdout } = await exec('git', ['diff', '--numstat', `${mainBranch}..${branchName}`], {
+  const { stdout } = await gitExec(['diff', '--numstat', `${mainBranch}..${branchName}`], {
     cwd: projectRoot,
     maxBuffer: MAX_BUFFER,
   });
@@ -213,9 +240,9 @@ export async function createWorktree(
 
   // Try -b first (new branch), fall back to existing branch
   try {
-    await exec('git', ['worktree', 'add', '-b', branchName, worktreePath], { cwd: repoRoot });
+    await gitExec(['worktree', 'add', '-b', branchName, worktreePath], { cwd: repoRoot });
   } catch {
-    await exec('git', ['worktree', 'add', worktreePath, branchName], { cwd: repoRoot });
+    await gitExec(['worktree', 'add', worktreePath, branchName], { cwd: repoRoot });
   }
 
   // Symlink selected directories
@@ -247,7 +274,7 @@ export async function removeWorktree(
 
   if (fs.existsSync(worktreePath)) {
     try {
-      await exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
+      await gitExec(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
     } catch {
       // Fallback: direct directory removal
       fs.rmSync(worktreePath, { recursive: true, force: true });
@@ -256,14 +283,14 @@ export async function removeWorktree(
 
   // Prune stale worktree entries
   try {
-    await exec('git', ['worktree', 'prune'], { cwd: repoRoot });
+    await gitExec(['worktree', 'prune'], { cwd: repoRoot });
   } catch {
     /* ignore */
   }
 
   if (deleteBranch) {
     try {
-      await exec('git', ['branch', '-D', '--', branchName], { cwd: repoRoot });
+      await gitExec(['branch', '-D', '--', branchName], { cwd: repoRoot });
     } catch (e: unknown) {
       const msg = String(e);
       if (!msg.toLowerCase().includes('not found')) throw e;
@@ -283,7 +310,7 @@ export async function getGitIgnoredDirs(projectRoot: string): Promise<string[]> 
       continue;
     }
     try {
-      await exec('git', ['check-ignore', '-q', name], { cwd: projectRoot });
+      await gitExec(['check-ignore', '-q', name], { cwd: projectRoot });
       results.push(name);
     } catch {
       /* not ignored */
@@ -314,7 +341,7 @@ export async function getChangedFiles(worktreePath: string): Promise<
   // git diff --raw --numstat <base>
   let diffStr = '';
   try {
-    const { stdout } = await exec('git', ['diff', '--raw', '--numstat', base], {
+    const { stdout } = await gitExec(['diff', '--raw', '--numstat', base], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -353,7 +380,7 @@ export async function getChangedFiles(worktreePath: string): Promise<
   // git status --porcelain for uncommitted paths
   let statusStr = '';
   try {
-    const { stdout } = await exec('git', ['status', '--porcelain'], {
+    const { stdout } = await gitExec(['status', '--porcelain'], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -424,7 +451,7 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
   const base = await detectMergeBase(worktreePath).catch(() => 'HEAD');
 
   try {
-    const { stdout } = await exec('git', ['diff', base, '--', filePath], {
+    const { stdout } = await gitExec(['diff', base, '--', filePath], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -456,7 +483,7 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
 export async function getWorktreeStatus(
   worktreePath: string,
 ): Promise<{ has_committed_changes: boolean; has_uncommitted_changes: boolean }> {
-  const { stdout: statusOut } = await exec('git', ['status', '--porcelain'], {
+  const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
     cwd: worktreePath,
     maxBuffer: MAX_BUFFER,
   });
@@ -465,7 +492,7 @@ export async function getWorktreeStatus(
   const mainBranch = await detectMainBranch(worktreePath).catch(() => 'HEAD');
   let hasCommittedChanges = false;
   try {
-    const { stdout: logOut } = await exec('git', ['log', `${mainBranch}..HEAD`, '--oneline'], {
+    const { stdout: logOut } = await gitExec(['log', `${mainBranch}..HEAD`, '--oneline'], {
       cwd: worktreePath,
     });
     hasCommittedChanges = logOut.trim().length > 0;
@@ -486,7 +513,7 @@ export async function checkMergeStatus(
 
   let mainAheadCount = 0;
   try {
-    const { stdout } = await exec('git', ['rev-list', '--count', `HEAD..${mainBranch}`], {
+    const { stdout } = await gitExec(['rev-list', '--count', `HEAD..${mainBranch}`], {
       cwd: worktreePath,
     });
     mainAheadCount = parseInt(stdout.trim(), 10) || 0;
@@ -498,7 +525,7 @@ export async function checkMergeStatus(
 
   const conflictingFiles: string[] = [];
   try {
-    await exec('git', ['merge-tree', '--write-tree', 'HEAD', mainBranch], { cwd: worktreePath });
+    await gitExec(['merge-tree', '--write-tree', 'HEAD', mainBranch], { cwd: worktreePath });
   } catch (e: unknown) {
     // merge-tree outputs conflict info on failure
     const output = String(e);
@@ -529,7 +556,7 @@ export async function mergeTask(
     );
 
     // Verify clean working tree
-    const { stdout: statusOut } = await exec('git', ['status', '--porcelain'], {
+    const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
       cwd: projectRoot,
     });
     if (statusOut.trim())
@@ -540,12 +567,12 @@ export async function mergeTask(
     const originalBranch = await getCurrentBranchName(projectRoot).catch(() => null);
 
     // Checkout main
-    await exec('git', ['checkout', mainBranch], { cwd: projectRoot });
+    await gitExec(['checkout', mainBranch], { cwd: projectRoot });
 
     const restoreBranch = async () => {
       if (originalBranch) {
         try {
-          await exec('git', ['checkout', originalBranch], { cwd: projectRoot });
+          await gitExec(['checkout', originalBranch], { cwd: projectRoot });
         } catch {
           /* ignore */
         }
@@ -554,25 +581,25 @@ export async function mergeTask(
 
     if (squash) {
       try {
-        await exec('git', ['merge', '--squash', '--', branchName], { cwd: projectRoot });
+        await gitExec(['merge', '--squash', '--', branchName], { cwd: projectRoot });
       } catch (e) {
-        await exec('git', ['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
+        await gitExec(['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
         await restoreBranch();
         throw new Error(`Squash merge failed: ${e}`);
       }
       const msg = message ?? 'Squash merge';
       try {
-        await exec('git', ['commit', '-m', msg], { cwd: projectRoot });
+        await gitExec(['commit', '-m', msg], { cwd: projectRoot });
       } catch (e) {
-        await exec('git', ['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
+        await gitExec(['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
         await restoreBranch();
         throw new Error(`Commit failed: ${e}`);
       }
     } else {
       try {
-        await exec('git', ['merge', '--', branchName], { cwd: projectRoot });
+        await gitExec(['merge', '--', branchName], { cwd: projectRoot });
       } catch (e) {
-        await exec('git', ['merge', '--abort'], { cwd: projectRoot }).catch(() => {});
+        await gitExec(['merge', '--abort'], { cwd: projectRoot }).catch(() => {});
         await restoreBranch();
         throw new Error(`Merge failed: ${e}`);
       }
@@ -593,7 +620,7 @@ export async function mergeTask(
 export async function getBranchLog(worktreePath: string): Promise<string> {
   const mainBranch = await detectMainBranch(worktreePath).catch(() => 'HEAD');
   try {
-    const { stdout } = await exec('git', ['log', `${mainBranch}..HEAD`, '--pretty=format:- %s'], {
+    const { stdout } = await gitExec(['log', `${mainBranch}..HEAD`, '--pretty=format:- %s'], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -604,7 +631,7 @@ export async function getBranchLog(worktreePath: string): Promise<string> {
 }
 
 export async function pushTask(projectRoot: string, branchName: string): Promise<void> {
-  await exec('git', ['push', '-u', 'origin', '--', branchName], { cwd: projectRoot });
+  await gitExec(['push', '-u', 'origin', '--', branchName], { cwd: projectRoot });
 }
 
 export async function rebaseTask(worktreePath: string): Promise<void> {
@@ -613,9 +640,9 @@ export async function rebaseTask(worktreePath: string): Promise<void> {
   return withWorktreeLock(lockKey, async () => {
     const mainBranch = await detectMainBranch(worktreePath);
     try {
-      await exec('git', ['rebase', mainBranch], { cwd: worktreePath });
+      await gitExec(['rebase', mainBranch], { cwd: worktreePath });
     } catch (e) {
-      await exec('git', ['rebase', '--abort'], { cwd: worktreePath }).catch(() => {});
+      await gitExec(['rebase', '--abort'], { cwd: worktreePath }).catch(() => {});
       throw new Error(`Rebase failed: ${e}`);
     }
     invalidateMergeBaseCache();
