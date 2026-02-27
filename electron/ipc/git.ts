@@ -22,9 +22,11 @@ async function gitExec(
   const maxBuffer = options?.maxBuffer ?? MAX_BUFFER;
 
   if (process.platform === 'win32') {
-    const wslCwd = cwd ? toWslPath(cwd) : undefined;
-    return execFileRaw('wsl.exe', ['git', ...args], {
-      cwd: wslCwd,
+    // On Windows, Node.js interprets the `cwd` option as a Windows-native path.
+    // We can't pass a WSL path (/mnt/c/...) as cwd to a Windows process.
+    // Instead, use `git -C <wslCwd>` to set the working directory inside WSL.
+    const wslArgs = cwd ? ['-C', toWslPath(cwd), ...args] : args;
+    return execFileRaw('wsl.exe', ['git', ...wslArgs], {
       maxBuffer,
       encoding: 'utf8',
     });
