@@ -6,6 +6,8 @@
 
 Enable Parallel Code to run as a native Windows desktop application by delegating all POSIX-dependent operations (PTY, shell, git, symlinks) to a WSL2 distro. The Electron main process detects WSL2 at startup, translates Windows paths to WSL mount paths, and routes `pty.spawn()` and `exec('git', …)` calls through `wsl.exe`. No new IPC channels are required; all changes are encapsulated in existing handler modules. A NSIS installer is added to the electron-builder config for x64 and arm64 Windows targets.
 
+> **Implementation note**: `gitExec()` passes the working directory to git via `git -C <wslPath>` rather than via Node.js's `cwd` option, because Node.js on Windows cannot `chdir` to a WSL-style path (`/mnt/c/…`). The `warnMountedDrive` flag is triggered when `projectRoot` matches a Windows-native path (`C:\…`) — not a `/mnt/` prefix — since paths from the renderer on Windows are always Windows-native format.
+
 ## Technical Context
 
 **Language/Version**: TypeScript (strict), Node.js 18+  

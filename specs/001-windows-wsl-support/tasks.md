@@ -81,9 +81,9 @@
 
 ### Implementation for User Story 3
 
-- [X] T016 [US3] Wrap all `exec('git', …)` calls in `electron/ipc/git.ts` with a `win32` delegation helper — on Windows, replace `exec('git', args, { cwd })` with `exec('wsl.exe', ['git', ...args], { cwd: toWslPath(cwd) })`; extract a private `gitExec(args, cwd)` helper that encapsulates this branching so all ~12 call sites become one-liners
-- [X] T017 [US3] Add path normalisation in `electron/ipc/git.ts` — after `wsl.exe git` calls that return file paths (e.g. `getChangedFiles`, `getWorktreeStatus`), strip any `/mnt/c/` prefix and re-emit as Windows paths if the consumer expects Windows paths; document in code comments which functions return which path shape
-- [X] T018 [US3] Add a Windows-mounted-drive warning in `electron/ipc/tasks.ts` (or `git.ts`) — before `createWorktree()`, if `process.platform === 'win32'` and `projectRoot` starts with `/mnt/`, log a console warning and surface it to the renderer via a resolved value flag (e.g. `{ path, branch, warnMountedDrive: true }`); update the `createTask` IPC handler in `register.ts` to pass the flag back to the renderer
+- [X] T016 [US3] Wrap all `exec('git', …)` calls in `electron/ipc/git.ts` with a `win32` delegation helper — on Windows, replace `exec('git', args, { cwd })` with `exec('wsl.exe', ['git', '-C', toWslPath(cwd), ...args])` (using `git -C` to set the WSL working directory, since Node.js on Windows cannot chdir to a `/mnt/…` path); extract a private `gitExec(args, options)` helper that encapsulates this branching so all ~34 call sites become one-liners
+- [X] T017 [US3] Path normalisation in `electron/ipc/git.ts` — all git call sites now use `gitExec()` which handles path translation internally via `git -C`; no post-processing of returned paths is needed since consumers (tasks.ts, register.ts) receive worktree paths that remain in the correct format for their context
+- [X] T018 [US3] Add a Windows-mounted-drive warning in `electron/ipc/tasks.ts` — before `createWorktree()`, if `process.platform === 'win32'` and `projectRoot` matches a Windows-native path (`/^[A-Za-z]:[/\\]/`), surface a `warnMountedDrive: true` flag in the return value (paths from the renderer on Windows are always Windows-native `C:\…` format, not `/mnt/…`)
 - [X] T019 [P] [US3] Update the `createTask` IPC response type in `electron/ipc/channels.ts` or the relevant type file — add optional `warnMountedDrive?: boolean` to the return shape so the renderer can display a warning toast; update the renderer-side `invoke` call type accordingly in `src/lib/ipc.ts`
 
 **Checkpoint**: Worktrees created and deleted on Windows; symlinks work in WSL-native storage; mounted-drive warning surfaced to UI; macOS/Linux behavior unchanged.
@@ -112,7 +112,7 @@
 - [X] T022 [P] Update `README.md` — add a "Windows (via WSL2)" section to the installation instructions, referencing `quickstart.md` for dev setup and noting WSL2 is required
 - [X] T023 [P] Update `CLAUDE.md` — add Windows platform notes: WSL2 required, repos should live in WSL-native storage, `electron/lib/wsl.ts` is the platform helper
 - [X] T024 Run full quality gates: `npm run check` (typecheck + lint + format:check) and `npm run test` — fix any regressions introduced by this feature; lint budget must stay ≤ 21 warnings
-- [ ] T025 Manual smoke test on Windows per `specs/001-windows-wsl-support/quickstart.md` — cover all four scenarios: WSL2 present/absent, terminal spawn, worktree create/delete, agent task
+- [ ] T025 Manual smoke test on Windows per `specs/001-windows-wsl-support/quickstart.md` — cover all four scenarios: WSL2 present/absent, terminal spawn, worktree create/delete, agent task *(requires physical Windows + WSL2 machine; cannot be automated on Linux CI)*
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-windows-wsl-support`  
 **Created**: 2026-02-25  
-**Status**: Draft  
+**Status**: Implemented  
 **Input**: Native Windows Electron app with all POSIX operations (PTY, git, shell) delegated to a WSL2 distro backend.
 
 ## Overview
