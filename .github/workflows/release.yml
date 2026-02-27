@@ -46,6 +46,34 @@ jobs:
             release/*.deb
           draft: true
 
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build Windows installers
+        run: npm run build -- --win --publish never
+
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.exe
+          draft: true
+
+      - name: Cleanup
+        if: always()
+        run: Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
+        shell: powershell
+
   build-macos:
     needs: create-release
     runs-on: macos-latest
