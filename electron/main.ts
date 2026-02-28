@@ -65,6 +65,8 @@ if (process.platform === 'win32' && !process.env.WSL_DISTRO) {
     });
     app.quit();
   });
+} else {
+  app.whenReady().then(createWindow);
 }
 
 // Verify that preload.cjs ALLOWED_CHANNELS stays in sync with the IPC enum.
@@ -161,8 +163,6 @@ function createWindow() {
     mainWindow = null;
   });
 }
-
-app.whenReady().then(createWindow);
 
 app.on('before-quit', () => {
   killAllAgents();
