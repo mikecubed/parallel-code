@@ -72,7 +72,9 @@ export function spawnAgent(
     // Use --cd to set the WSL working directory from the translated path
     const wslCwd = toWslPath(args.cwd || process.env.HOME || '/');
     spawnArgs = ['--cd', wslCwd, '--', innerCommand, ...args.args];
-    cwd = args.cwd || process.env.HOME || '/';
+    // node-pty on Windows needs a valid Windows path for cwd; the actual
+    // WSL working directory is set via --cd above.
+    cwd = process.env.USERPROFILE || process.env.SystemRoot || 'C:\\';
   } else {
     command = args.command || process.env.SHELL || '/bin/sh';
     spawnArgs = args.args;
