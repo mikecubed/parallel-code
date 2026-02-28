@@ -68,12 +68,22 @@ export function detectWsl(): WslInfo {
 
 /**
  * Converts a Windows absolute path to its WSL mount equivalent.
- *   C:\Users\alice\project  →  /mnt/c/Users/alice/project
- *   /home/alice/project     →  /home/alice/project  (returned unchanged)
+ *   C:\Users\alice\project             →  /mnt/c/Users/alice/project
+ *   \\wsl$\Ubuntu\home\alice\project   →  /home/alice/project
+ *   //wsl$/Ubuntu/home/alice/project   →  /home/alice/project  (Electron-normalised form)
+ *   /home/alice/project                →  /home/alice/project  (returned unchanged)
  *
  * Throws a TypeError for paths that are neither Windows absolute nor POSIX absolute.
  */
 export function toWslPath(winPath: string): string {
+  // UNC WSL path: \\wsl$\<distro>\... or //wsl$/... or //wsl.localhost/<distro>/...
+  // Electron normalises the Windows file-picker result to forward slashes, so both
+  // forms need to be handled.
+  const uncMatch = /^[/\\]{2}wsl[$.]?[^/\\]*[/\\][^/\\]+([/\\].*)$/i.exec(winPath);
+  if (uncMatch) {
+    return uncMatch[1].replace(/\\/g, '/');
+  }
+
   // Already a POSIX absolute path — return unchanged
   if (winPath.startsWith('/')) return winPath;
 

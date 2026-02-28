@@ -29,6 +29,7 @@ import {
 import { createTask, deleteTask } from './tasks.js';
 import { listAgents } from './agents.js';
 import { saveAppState, loadAppState } from './persistence.js';
+import { toWslPath } from '../lib/wsl.js';
 import path from 'path';
 
 /** Reject paths that are non-absolute or attempt directory traversal. */
@@ -204,7 +205,9 @@ export function registerAllHandlers(win: BrowserWindow): void {
     if (args?.multiple) properties.push('multiSelections');
     const result = await dialog.showOpenDialog(win, { properties });
     if (result.canceled) return null;
-    return args?.multiple ? result.filePaths : (result.filePaths[0] ?? null);
+    const toPath = (p: string) => (process.platform === 'win32' ? toWslPath(p) : p);
+    if (args?.multiple) return result.filePaths.map(toPath);
+    return toPath(result.filePaths[0] ?? '') || null;
   });
 
   // --- Shell/Opener ---

@@ -53,7 +53,19 @@ describe('toWslPath', () => {
     expect(toWslPath('C://Users//alice')).toBe('/mnt/c/Users/alice');
   });
 
-  it('throws TypeError for UNC paths', () => {
+  it('converts a WSL UNC path (backslash form)', () => {
+    expect(toWslPath('\\\\wsl$\\Ubuntu\\home\\alice\\project')).toBe('/home/alice/project');
+  });
+
+  it('converts a WSL UNC path (forward-slash Electron form)', () => {
+    expect(toWslPath('//wsl$/Ubuntu/home/alice/project')).toBe('/home/alice/project');
+  });
+
+  it('converts a WSL UNC path with wsl.localhost (Windows 11)', () => {
+    expect(toWslPath('//wsl.localhost/Ubuntu/home/alice/project')).toBe('/home/alice/project');
+  });
+
+  it('throws TypeError for non-WSL UNC paths', () => {
     expect(() => toWslPath('\\\\server\\share')).toThrow(TypeError);
   });
 
