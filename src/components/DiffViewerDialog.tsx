@@ -7,12 +7,17 @@ import '@git-diff-view/solid/styles/diff-view.css';
 import { theme } from '../lib/theme';
 import { isBinaryDiff } from '../lib/diff-parser';
 import { getStatusColor } from '../lib/status-colors';
+import { openFileInEditor } from '../lib/shell';
 import type { ChangedFile } from '../ipc/types';
 
 interface DiffViewerDialogProps {
   file: ChangedFile | null;
   worktreePath: string;
   onClose: () => void;
+  /** Project root for branch-based fallback when worktree doesn't exist */
+  projectRoot?: string;
+  /** Branch name for branch-based fallback when worktree doesn't exist */
+  branchName?: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -77,15 +82,31 @@ export function DiffViewerDialog(props: DiffViewerDialogProps) {
     const file = props.file;
     if (!file) return;
 
+    const worktreePath = props.worktreePath;
+    const projectRoot = props.projectRoot;
+    const branchName = props.branchName;
+
     setLoading(true);
     setError('');
     setBinary(false);
     setRawDiff('');
 
-    invoke<string>(IPC.GetFileDiff, {
-      worktreePath: props.worktreePath,
-      filePath: file.path,
-    })
+    const worktreePromise = worktreePath
+      ? invoke<string>(IPC.GetFileDiff, { worktreePath, filePath: file.path })
+      : Promise.reject(new Error('no worktree'));
+
+    worktreePromise
+      .catch(() => {
+        // Worktree may not exist — try branch-based fallback
+        if (projectRoot && branchName) {
+          return invoke<string>(IPC.GetFileDiffFromBranch, {
+            projectRoot,
+            branchName,
+            filePath: file.path,
+          });
+        }
+        return '';
+      })
       .then((raw) => {
         if (isBinaryDiff(raw)) {
           setBinary(true);
@@ -195,6 +216,27 @@ export function DiffViewerDialog(props: DiffViewerDialogProps) {
                   Unified
                 </button>
               </div>
+
+              <button
+                onClick={() => openFileInEditor(props.worktreePath, file().path)}
+                disabled={!props.worktreePath}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: theme.fgMuted,
+                  cursor: props.worktreePath ? 'pointer' : 'default',
+                  opacity: props.worktreePath ? '1' : '0.3',
+                  padding: '4px',
+                  display: 'flex',
+                  'align-items': 'center',
+                  'border-radius': '4px',
+                }}
+                title="Open in editor"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3.5 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-3a.75.75 0 0 1 1.5 0v3A3 3 0 0 1 12.5 16h-9A3 3 0 0 1 0 12.5v-9A3 3 0 0 1 3.5 0h3a.75.75 0 0 1 0 1.5h-3ZM10 .75a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0V2.56L8.53 8.53a.75.75 0 0 1-1.06-1.06L13.44 1.5H10.75A.75.75 0 0 1 10 .75Z" />
+                </svg>
+              </button>
 
               <button
                 onClick={() => props.onClose()}

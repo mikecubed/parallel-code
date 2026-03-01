@@ -14,6 +14,7 @@ export const [store, setStore] = createStore<AppStore>({
   activeTaskId: null,
   activeAgentId: null,
   availableAgents: [],
+  customAgents: [],
   showNewTaskDialog: false,
   sidebarVisible: true,
   fontScales: {},
@@ -40,6 +41,7 @@ export const [store, setStore] = createStore<AppStore>({
   autoTrustFolders: false,
   inactiveColumnOpacity: 0.6,
   newTaskDropUrl: null,
+  newTaskPrefillPrompt: null,
   remoteAccess: {
     enabled: false,
     token: null,
@@ -49,6 +51,7 @@ export const [store, setStore] = createStore<AppStore>({
     tailscaleUrl: null,
     connectedClients: 0,
   },
+  showArena: false,
 });
 
 export function updateWindowTitle(_taskName?: string): void {

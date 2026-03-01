@@ -1,4 +1,5 @@
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron';
+import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { IPC } from './channels.js';
 import {
@@ -18,13 +19,19 @@ import {
   getMainBranch,
   getCurrentBranch,
   getChangedFiles,
+  getChangedFilesFromBranch,
   getFileDiff,
+  getFileDiffFromBranch,
   getWorktreeStatus,
+  commitAll,
+  discardUncommitted,
   checkMergeStatus,
   mergeTask,
   getBranchLog,
   pushTask,
   rebaseTask,
+  createWorktree,
+  removeWorktree,
 } from './git.js';
 import { createTask, deleteTask } from './tasks.js';
 import { listAgents } from './agents.js';
@@ -89,10 +96,21 @@ export function registerAllHandlers(win: BrowserWindow): void {
     validatePath(args.worktreePath, 'worktreePath');
     return getChangedFiles(args.worktreePath);
   });
+  ipcMain.handle(IPC.GetChangedFilesFromBranch, (_e, args) => {
+    validatePath(args.projectRoot, 'projectRoot');
+    validateBranchName(args.branchName, 'branchName');
+    return getChangedFilesFromBranch(args.projectRoot, args.branchName);
+  });
   ipcMain.handle(IPC.GetFileDiff, (_e, args) => {
     validatePath(args.worktreePath, 'worktreePath');
     validateRelativePath(args.filePath, 'filePath');
     return getFileDiff(args.worktreePath, args.filePath);
+  });
+  ipcMain.handle(IPC.GetFileDiffFromBranch, (_e, args) => {
+    validatePath(args.projectRoot, 'projectRoot');
+    validateBranchName(args.branchName, 'branchName');
+    validateRelativePath(args.filePath, 'filePath');
+    return getFileDiffFromBranch(args.projectRoot, args.branchName, args.filePath);
   });
   ipcMain.handle(IPC.GetGitignoredDirs, (_e, args) => {
     validatePath(args.projectRoot, 'projectRoot');
@@ -101,6 +119,14 @@ export function registerAllHandlers(win: BrowserWindow): void {
   ipcMain.handle(IPC.GetWorktreeStatus, (_e, args) => {
     validatePath(args.worktreePath, 'worktreePath');
     return getWorktreeStatus(args.worktreePath);
+  });
+  ipcMain.handle(IPC.CommitAll, (_e, args) => {
+    validatePath(args.worktreePath, 'worktreePath');
+    return commitAll(args.worktreePath, args.message);
+  });
+  ipcMain.handle(IPC.DiscardUncommitted, (_e, args) => {
+    validatePath(args.worktreePath, 'worktreePath');
+    return discardUncommitted(args.worktreePath);
   });
   ipcMain.handle(IPC.CheckMergeStatus, (_e, args) => {
     validatePath(args.worktreePath, 'worktreePath');
@@ -158,6 +184,46 @@ export function registerAllHandlers(win: BrowserWindow): void {
     return json;
   });
 
+  // --- Arena persistence ---
+  ipcMain.handle(IPC.SaveArenaData, (_e, args) => {
+    const filePath = path.join(app.getPath('userData'), args.filename);
+    const basename = path.basename(filePath);
+    if (basename !== args.filename) throw new Error('Invalid filename');
+    if (!basename.startsWith('arena-') || !basename.endsWith('.json'))
+      throw new Error('Arena files must be arena-*.json');
+    fs.writeFileSync(filePath, args.json, 'utf-8');
+  });
+
+  ipcMain.handle(IPC.LoadArenaData, (_e, args) => {
+    const filePath = path.join(app.getPath('userData'), args.filename);
+    const basename = path.basename(filePath);
+    if (basename !== args.filename) throw new Error('Invalid filename');
+    if (!basename.startsWith('arena-') || !basename.endsWith('.json'))
+      throw new Error('Arena files must be arena-*.json');
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC.CreateArenaWorktree, (_e, args) => {
+    validatePath(args.projectRoot, 'projectRoot');
+    validateBranchName(args.branchName, 'branchName');
+    return createWorktree(args.projectRoot, args.branchName, args.symlinkDirs ?? [], true);
+  });
+
+  ipcMain.handle(IPC.RemoveArenaWorktree, (_e, args) => {
+    validatePath(args.projectRoot, 'projectRoot');
+    validateBranchName(args.branchName, 'branchName');
+    return removeWorktree(args.projectRoot, args.branchName, true);
+  });
+
+  ipcMain.handle(IPC.CheckPathExists, (_e, args) => {
+    validatePath(args.path, 'path');
+    return fs.existsSync(args.path);
+  });
+
   // --- Window management ---
   ipcMain.handle(IPC.WindowIsFocused, () => win.isFocused());
   ipcMain.handle(IPC.WindowIsMaximized, () => win.isMaximized());
@@ -209,6 +275,12 @@ export function registerAllHandlers(win: BrowserWindow): void {
   ipcMain.handle(IPC.ShellReveal, (_e, args) => {
     validatePath(args.filePath, 'filePath');
     shell.showItemInFolder(args.filePath);
+  });
+
+  ipcMain.handle(IPC.ShellOpenFile, (_e, args) => {
+    validatePath(args.worktreePath, 'worktreePath');
+    validateRelativePath(args.filePath, 'filePath');
+    return shell.openPath(path.join(args.worktreePath, args.filePath));
   });
 
   // --- Remote access ---
@@ -273,11 +345,31 @@ export function registerAllHandlers(win: BrowserWindow): void {
   win.on('blur', () => {
     if (!win.isDestroyed()) win.webContents.send(IPC.WindowBlur);
   });
+  // Leading+trailing throttle: fire immediately, suppress for 100ms, then fire once more
+  // if events arrived during suppression (ensures the final state is always forwarded).
+  let resizeThrottled = false;
+  let resizePending = false;
   win.on('resize', () => {
-    if (!win.isDestroyed()) win.webContents.send(IPC.WindowResized);
+    if (win.isDestroyed()) return;
+    if (resizeThrottled) { resizePending = true; return; }
+    resizeThrottled = true;
+    win.webContents.send(IPC.WindowResized);
+    setTimeout(() => {
+      resizeThrottled = false;
+      if (resizePending) { resizePending = false; if (!win.isDestroyed()) win.webContents.send(IPC.WindowResized); }
+    }, 100);
   });
+  let moveThrottled = false;
+  let movePending = false;
   win.on('move', () => {
-    if (!win.isDestroyed()) win.webContents.send(IPC.WindowMoved);
+    if (win.isDestroyed()) return;
+    if (moveThrottled) { movePending = true; return; }
+    moveThrottled = true;
+    win.webContents.send(IPC.WindowMoved);
+    setTimeout(() => {
+      moveThrottled = false;
+      if (movePending) { movePending = false; if (!win.isDestroyed()) win.webContents.send(IPC.WindowMoved); }
+    }, 100);
   });
   win.on('close', (e) => {
     e.preventDefault();

@@ -11,7 +11,15 @@ export {
   pickAndAddProject,
   PASTEL_HUES,
 } from './projects';
-export { loadAgents, addAgentToTask, markAgentExited, restartAgent } from './agents';
+export {
+  loadAgents,
+  addAgentToTask,
+  markAgentExited,
+  restartAgent,
+  addCustomAgent,
+  removeCustomAgent,
+  updateCustomAgent,
+} from './agents';
 export {
   createTask,
   createDirectTask,
@@ -32,6 +40,7 @@ export {
   hasDirectModeTask,
   getGitHubDropDefaults,
   setNewTaskDropUrl,
+  setNewTaskPrefillPrompt,
 } from './tasks';
 export {
   setActiveTask,
@@ -74,6 +83,7 @@ export {
   getPanelSize,
   setPanelSizes,
   toggleSidebar,
+  toggleArena,
   setTerminalFont,
   setThemePreset,
   setAutoTrustFolders,
