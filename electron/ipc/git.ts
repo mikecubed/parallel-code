@@ -1,12 +1,32 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
-import path from 'path';
-import { toWslPath } from '../lib/wsl.js';
+import { toWslPath, toWinPath } from '../lib/wsl.js';
 
 const execFileRaw = promisify(execFile);
 
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
+
+/**
+ * Convert a POSIX path to a Windows-accessible path for Node.js fs operations.
+ * On non-Windows platforms the path is returned unchanged.
+ */
+function fsPath(p: string): string {
+  if (process.platform !== 'win32') return p;
+  return toWinPath(p, process.env.WSL_DISTRO ?? 'Ubuntu');
+}
+
+/**
+ * Join path segments using POSIX separators.
+ * All stored paths are POSIX on Windows too, so path.join (win32) would
+ * produce wrong separators.
+ */
+function pjoin(...parts: string[]): string {
+  return parts
+    .join('/')
+    .replace(/\/+/g, '/')
+    .replace(/^(.+)\/$/, '$1');
+}
 
 /**
  * Execute a git command, delegating through wsl.exe on Windows so that git
@@ -167,9 +187,10 @@ async function detectMergeBase(repoRoot: string): Promise<string> {
 async function detectRepoLockKey(p: string): Promise<string> {
   const { stdout } = await gitExec(['rev-parse', '--git-common-dir'], { cwd: p });
   const commonDir = stdout.trim();
-  const commonPath = path.isAbsolute(commonDir) ? commonDir : path.join(p, commonDir);
+  // All stored paths are POSIX; use pjoin to avoid win32 path.join inserting backslashes.
+  const commonPath = commonDir.startsWith('/') ? commonDir : pjoin(p, commonDir);
   try {
-    return fs.realpathSync(commonPath);
+    return fs.realpathSync(fsPath(commonPath));
   } catch {
     return commonPath;
   }
@@ -251,11 +272,16 @@ export async function createWorktree(
   for (const name of symlinkDirs) {
     // Reject names that could escape the worktree directory
     if (name.includes('/') || name.includes('\\') || name.includes('..') || name === '.') continue;
-    const source = path.join(repoRoot, name);
-    const target = path.join(worktreePath, name);
+    const source = pjoin(repoRoot, name);
+    const target = pjoin(worktreePath, name);
     try {
-      if (fs.statSync(source).isDirectory() && !fs.existsSync(target)) {
-        fs.symlinkSync(source, target);
+      if (fs.statSync(fsPath(source)).isDirectory() && !fs.existsSync(fsPath(target))) {
+        if (process.platform === 'win32') {
+          // fs.symlinkSync can't resolve POSIX paths; create the symlink inside WSL.
+          await execFileRaw('wsl.exe', ['ln', '-sf', source, target]);
+        } else {
+          fs.symlinkSync(source, target);
+        }
       }
     } catch {
       /* ignore */
@@ -272,14 +298,14 @@ export async function removeWorktree(
 ): Promise<void> {
   const worktreePath = `${repoRoot}/.worktrees/${branchName}`;
 
-  if (!fs.existsSync(repoRoot)) return;
+  if (!fs.existsSync(fsPath(repoRoot))) return;
 
-  if (fs.existsSync(worktreePath)) {
+  if (fs.existsSync(fsPath(worktreePath))) {
     try {
       await gitExec(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
     } catch {
       // Fallback: direct directory removal
-      fs.rmSync(worktreePath, { recursive: true, force: true });
+      fs.rmSync(fsPath(worktreePath), { recursive: true, force: true });
     }
   }
 
@@ -305,9 +331,9 @@ export async function removeWorktree(
 export async function getGitIgnoredDirs(projectRoot: string): Promise<string[]> {
   const results: string[] = [];
   for (const name of SYMLINK_CANDIDATES) {
-    const dirPath = path.join(projectRoot, name);
+    const dirPath = pjoin(projectRoot, name);
     try {
-      if (!fs.statSync(dirPath).isDirectory()) continue;
+      if (!fs.statSync(fsPath(dirPath)).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -421,12 +447,12 @@ export async function getChangedFiles(worktreePath: string): Promise<
   // Files from statusMap not in numstat (untracked)
   for (const [p, status] of statusMap) {
     if (seen.has(p)) continue;
-    const fullPath = path.join(worktreePath, p);
+    const fullPath = pjoin(worktreePath, p);
     let added = 0;
     try {
-      const stat = await fs.promises.stat(fullPath);
+      const stat = await fs.promises.stat(fsPath(fullPath));
       if (stat.isFile() && stat.size < MAX_BUFFER) {
-        const content = await fs.promises.readFile(fullPath, 'utf8');
+        const content = await fs.promises.readFile(fsPath(fullPath), 'utf8');
         added = content.split('\n').length;
       }
     } catch {
@@ -463,11 +489,11 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
   }
 
   // Untracked file — format as all-additions
-  const fullPath = path.join(worktreePath, filePath);
+  const fullPath = pjoin(worktreePath, filePath);
   try {
-    const stat = await fs.promises.stat(fullPath);
+    const stat = await fs.promises.stat(fsPath(fullPath));
     if (stat.isFile() && stat.size < MAX_BUFFER) {
-      const content = await fs.promises.readFile(fullPath, 'utf8');
+      const content = await fs.promises.readFile(fsPath(fullPath), 'utf8');
       const lines = content.split('\n');
       let pseudo = `--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${lines.length} @@\n`;
       for (const line of lines) {

@@ -99,3 +99,28 @@ export function toWslPath(winPath: string): string {
     `toWslPath: unrecognised path format — expected a Windows absolute path (e.g. C:\\Users\\...) or a POSIX absolute path (e.g. /home/...), got: ${winPath}`,
   );
 }
+
+/**
+ * Converts a POSIX WSL path to a Windows-accessible path for Node.js fs operations.
+ * Node.js runs as a Windows process and cannot open POSIX paths directly.
+ *
+ *   /mnt/c/Users/alice  →  C:\Users\alice        (drive mount → drive letter)
+ *   /home/alice         →  \\wsl$\<distro>\home\alice  (WSL-native → UNC)
+ *
+ * Already-Windows paths are returned unchanged.
+ * Requires the WSL distro name (from process.env.WSL_DISTRO).
+ */
+export function toWinPath(posixPath: string, distro: string): string {
+  if (!posixPath.startsWith('/')) return posixPath; // already a Windows path
+
+  // /mnt/<drive>/... → <drive>:\...
+  const mntMatch = /^\/mnt\/([a-z])(\/(.*))?$/.exec(posixPath);
+  if (mntMatch) {
+    const drive = mntMatch[1].toUpperCase();
+    const rest = mntMatch[3] ? mntMatch[3].replace(/\//g, '\\') : '';
+    return rest ? `${drive}:\\${rest}` : `${drive}:\\`;
+  }
+
+  // WSL-native path → UNC
+  return `\\\\wsl$\\${distro}${posixPath.replace(/\//g, '\\')}`;
+}

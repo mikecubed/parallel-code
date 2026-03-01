@@ -5,7 +5,7 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
-import { toWslPath, detectWsl } from '../../electron/lib/wsl';
+import { toWslPath, toWinPath, detectWsl } from '../../electron/lib/wsl';
 
 // ---------------------------------------------------------------------------
 // toWslPath
@@ -75,6 +75,37 @@ describe('toWslPath', () => {
 
   it('throws TypeError for empty string', () => {
     expect(() => toWslPath('')).toThrow(TypeError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toWinPath
+// ---------------------------------------------------------------------------
+describe('toWinPath', () => {
+  it('converts a /mnt/c/ WSL path to a Windows drive path', () => {
+    expect(toWinPath('/mnt/c/Users/alice', 'Ubuntu')).toBe('C:\\Users\\alice');
+  });
+
+  it('converts /mnt/d/ to D:\\...', () => {
+    expect(toWinPath('/mnt/d/repos/myapp', 'Ubuntu')).toBe('D:\\repos\\myapp');
+  });
+
+  it('converts a drive root /mnt/c to C:\\', () => {
+    expect(toWinPath('/mnt/c', 'Ubuntu')).toBe('C:\\');
+  });
+
+  it('converts a WSL-native path to a UNC path', () => {
+    expect(toWinPath('/home/alice/project', 'Ubuntu')).toBe(
+      '\\\\wsl$\\Ubuntu\\home\\alice\\project',
+    );
+  });
+
+  it('includes the distro name in the UNC path', () => {
+    expect(toWinPath('/home/alice', 'Debian')).toBe('\\\\wsl$\\Debian\\home\\alice');
+  });
+
+  it('returns an already-Windows path unchanged', () => {
+    expect(toWinPath('C:\\Users\\alice', 'Ubuntu')).toBe('C:\\Users\\alice');
   });
 });
 
