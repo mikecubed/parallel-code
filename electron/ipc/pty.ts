@@ -71,7 +71,13 @@ export function spawnAgent(
     const innerCommand = args.command || 'bash';
     // Use --cd to set the WSL working directory from the translated path
     const wslCwd = toWslPath(args.cwd || process.env.HOME || '/');
-    spawnArgs = ['--cd', wslCwd, '--', innerCommand, ...args.args];
+    // Explicitly set PATH inside WSL via `env` — wsl.exe does not forward
+    // Windows-side env vars to the Linux process, so setting PATH in the
+    // node-pty env has no effect inside WSL. Using `env` ensures the
+    // login-shell PATH captured by detectWsl() is applied.
+    const envPrefix: string[] =
+      process.env.WSL_PATH ? ['env', `PATH=${process.env.WSL_PATH}`] : [];
+    spawnArgs = ['--cd', wslCwd, '--', ...envPrefix, innerCommand, ...args.args];
     // node-pty on Windows needs a valid Windows path for cwd; the actual
     // WSL working directory is set via --cd above.
     cwd = process.env.USERPROFILE || process.env.SystemRoot || 'C:\\';
