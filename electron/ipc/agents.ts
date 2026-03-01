@@ -36,6 +36,15 @@ const DEFAULT_AGENTS: AgentDef[] = [
     skip_permissions_args: ['--yolo'],
     description: "Google's Gemini CLI agent",
   },
+  {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    command: 'copilot',
+    args: [],
+    resume_args: ['--continue'],
+    skip_permissions_args: ['--yolo'],
+    description: "GitHub's Copilot CLI agent",
+  },
 ];
 
 export function listAgents(): AgentDef[] {
