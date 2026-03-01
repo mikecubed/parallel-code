@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 // When launched from a .desktop file, PATH is minimal (/usr/bin:/bin).
 // Resolve the user's full login-interactive shell PATH so spawned PTYs
-// can find CLI tools like claude, codex, gemini, etc.
+// can find CLI tools like claude, codex, gemini, copilot, etc.
 //
 // Uses -ilc (interactive + login) to source both .zprofile/.profile AND
 // .zshrc/.bashrc, where version managers (nvm, volta, fnm) add to PATH.
