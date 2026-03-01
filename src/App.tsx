@@ -16,6 +16,7 @@ import { theme } from './lib/theme';
 import {
   store,
   loadAgents,
+  loadShells,
   loadState,
   saveState,
   toggleNewTaskDialog,
@@ -104,7 +105,15 @@ function App() {
   const [windowFocused, setWindowFocused] = createSignal(true);
   const [windowMaximized, setWindowMaximized] = createSignal(false);
   const [showDropOverlay, setShowDropOverlay] = createSignal(false);
+  const [wslBannerDismissed, setWslBannerDismissed] = createSignal(false);
   let dragCounter = 0;
+
+  // Show the WSL2-not-found banner on Windows when shells have loaded but WSL2
+  // is absent. availableShells is empty on macOS/Linux so this never triggers there.
+  const showWslBanner = () =>
+    !wslBannerDismissed() &&
+    store.availableShells.length > 0 &&
+    !store.availableShells.some((s) => s.id === 'wsl2');
 
   function extractGitHubUrl(dt: DataTransfer): string | null {
     const uriList = dt.getData('text/uri-list');
@@ -277,6 +286,7 @@ function App() {
     })();
 
     await loadAgents();
+    await loadShells();
     await loadState();
     await restoreWindowState();
     await captureWindowState();
@@ -663,6 +673,65 @@ function App() {
         </main>
         <Show when={!isMac}>
           <WindowResizeHandles />
+        </Show>
+        <Show when={showWslBanner()}>
+          <div
+            style={{
+              position: 'fixed',
+              top: isMac ? '28px' : '32px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: `color-mix(in srgb, ${theme.warning} 12%, ${theme.bgElevated})`,
+              border: `1px solid color-mix(in srgb, ${theme.warning} 40%, transparent)`,
+              'border-radius': '8px',
+              padding: '8px 14px',
+              color: theme.fg,
+              'font-size': '12px',
+              'z-index': '1500',
+              'box-shadow': '0 4px 16px rgba(0,0,0,0.3)',
+              display: 'flex',
+              'align-items': 'center',
+              gap: '10px',
+              'max-width': '600px',
+              'white-space': 'nowrap',
+            }}
+          >
+            <span style={{ color: theme.warning }}>⚠</span>
+            <span>
+              WSL2 not detected — AI agents work best in a WSL2 Linux environment. PowerShell
+              terminals are available but have limited agent compatibility.
+            </span>
+            <a
+              href="https://aka.ms/wsl2"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: theme.accent,
+                'text-decoration': 'underline',
+                'flex-shrink': '0',
+                cursor: 'pointer',
+              }}
+            >
+              Install WSL2 ↗
+            </a>
+            <button
+              type="button"
+              onClick={() => setWslBannerDismissed(true)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: theme.fgMuted,
+                cursor: 'pointer',
+                'font-size': '14px',
+                'flex-shrink': '0',
+                padding: '0 2px',
+                'line-height': '1',
+              }}
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
         </Show>
         <HelpDialog open={store.showHelpDialog} onClose={() => toggleHelpDialog(false)} />
         <SettingsDialog

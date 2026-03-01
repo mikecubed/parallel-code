@@ -7,6 +7,7 @@ import { registerAllHandlers } from './ipc/register.js';
 import { killAllAgents } from './ipc/pty.js';
 import { IPC } from './ipc/channels.js';
 import { detectWsl } from './lib/wsl.js';
+import { detectPowerShell } from './lib/powershell.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,11 +27,19 @@ const __dirname = path.dirname(__filename);
 function fixPath(): void {
   if (process.platform === 'win32') {
     const wsl = detectWsl();
+    const ps = detectPowerShell();
+
     if (wsl.available) {
       process.env.WSL_DISTRO = wsl.distro;
       // WSL_PATH is set as a side effect of detectWsl() when available
     } else {
       process.env.WSL_DISTRO = '';
+    }
+
+    if (ps.available) {
+      process.env.PS_EXE = ps.exePath;
+      process.env.PS_VARIANT = ps.variant;
+      process.env.PS_VERSION = ps.version;
     }
     return;
   }
@@ -52,8 +61,10 @@ function fixPath(): void {
 
 fixPath();
 
-// On Windows, require WSL2 — show a clear dialog and quit if absent.
-if (process.platform === 'win32' && !process.env.WSL_DISTRO) {
+// On Windows, require at least WSL2 or PowerShell.
+// If neither is found, show a hard error and quit.
+// If only PowerShell is found (no WSL2), warn the user and allow continuing.
+if (process.platform === 'win32' && !process.env.WSL_DISTRO && !process.env.PS_EXE) {
   app.whenReady().then(async () => {
     await dialog.showMessageBox({
       type: 'error',
@@ -64,6 +75,25 @@ if (process.platform === 'win32' && !process.env.WSL_DISTRO) {
       buttons: ['OK'],
     });
     app.quit();
+  });
+} else if (process.platform === 'win32' && !process.env.WSL_DISTRO) {
+  // PowerShell found but no WSL2 — warn and allow continuing
+  app.whenReady().then(async () => {
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'WSL2 Not Found',
+      message: 'WSL2 was not detected. AI coding agents work best inside a WSL2 Linux environment.',
+      detail:
+        'PowerShell is available for running Windows terminals. However, AI agents (Claude Code, Codex CLI, etc.) require WSL2 to work correctly.\n\nVisit: https://aka.ms/wsl2 to install WSL2.\n\nContinue with PowerShell only?',
+      buttons: ['Continue', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (result.response === 1) {
+      app.quit();
+    } else {
+      createWindow();
+    }
   });
 } else {
   app.whenReady().then(createWindow);
