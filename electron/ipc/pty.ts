@@ -55,6 +55,7 @@ export function spawnAgent(
     env: Record<string, string>;
     cols: number;
     rows: number;
+    shellType?: 'wsl2' | 'pwsh' | 'powershell';
     onOutput: { __CHANNEL_ID__: string };
   },
 ): void {
@@ -67,33 +68,51 @@ export function spawnAgent(
   let cwd: string;
 
   if (process.platform === 'win32') {
-    command = 'wsl.exe';
-    const innerCommand = args.command || 'bash';
-    // Use --cd to set the WSL working directory from the translated path
-    const wslCwd = toWslPath(args.cwd || process.env.HOME || '/');
-    const isShell =
-      innerCommand === 'bash' ||
-      innerCommand === 'sh' ||
-      innerCommand === '/bin/bash' ||
-      innerCommand === '/bin/sh';
-    if (isShell) {
-      // Shell commands: pass args directly; bash sources .bashrc as an
-      // interactive shell (PTY attached), giving it the correct PATH.
-      const envPrefix: string[] =
-        process.env.WSL_PATH ? ['env', `PATH=${process.env.WSL_PATH}`] : [];
-      spawnArgs = ['--cd', wslCwd, '--', ...envPrefix, innerCommand, ...args.args];
+    const shellType = args.shellType ?? 'wsl2';
+
+    if (shellType === 'pwsh' || shellType === 'powershell') {
+      // PowerShell branch — spawn directly, no WSL translation needed.
+      command = process.env.PS_EXE || (shellType === 'pwsh' ? 'pwsh.exe' : 'powershell.exe');
+      const innerCommand = args.command;
+      if (!innerCommand) {
+        // Interactive PowerShell shell
+        spawnArgs = ['-NoLogo'];
+      } else {
+        // Agent or custom command — invoke directly in PowerShell
+        spawnArgs = ['-NoLogo', '-Command', innerCommand, ...args.args];
+      }
+      // Use the provided Windows path directly (no WSL translation)
+      cwd = args.cwd || process.env.USERPROFILE || 'C:\\';
     } else {
-      // Agent commands (claude, codex, etc.): wrap in `bash --login -c` so
-      // .profile/.bashrc are sourced and PATH includes ~/.local/bin etc.
-      // We embed the command directly in the -c script using single-quoted
-      // args to avoid Windows CreateProcess double-quote mangling of "$@".
-      const singleQuote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
-      const cmdScript = [innerCommand, ...args.args].map(singleQuote).join(' ');
-      spawnArgs = ['--cd', wslCwd, '--', 'bash', '--login', '-c', cmdScript];
+      // WSL2 branch (default)
+      command = 'wsl.exe';
+      const innerCommand = args.command || 'bash';
+      // Use --cd to set the WSL working directory from the translated path
+      const wslCwd = toWslPath(args.cwd || process.env.HOME || '/');
+      const isShell =
+        innerCommand === 'bash' ||
+        innerCommand === 'sh' ||
+        innerCommand === '/bin/bash' ||
+        innerCommand === '/bin/sh';
+      if (isShell) {
+        // Shell commands: pass args directly; bash sources .bashrc as an
+        // interactive shell (PTY attached), giving it the correct PATH.
+        const envPrefix: string[] =
+          process.env.WSL_PATH ? ['env', `PATH=${process.env.WSL_PATH}`] : [];
+        spawnArgs = ['--cd', wslCwd, '--', ...envPrefix, innerCommand, ...args.args];
+      } else {
+        // Agent commands (claude, codex, copilot, etc.): wrap in `bash --login -c`
+        // so .profile/.bashrc are sourced and PATH includes ~/.local/bin etc.
+        // We embed the command directly in the -c script using single-quoted
+        // args to avoid Windows CreateProcess double-quote mangling of "$@".
+        const singleQuote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+        const cmdScript = [innerCommand, ...args.args].map(singleQuote).join(' ');
+        spawnArgs = ['--cd', wslCwd, '--', 'bash', '--login', '-c', cmdScript];
+      }
+      // node-pty on Windows needs a valid Windows path for cwd; the actual
+      // WSL working directory is set via --cd above.
+      cwd = process.env.USERPROFILE || process.env.SystemRoot || 'C:\\';
     }
-    // node-pty on Windows needs a valid Windows path for cwd; the actual
-    // WSL working directory is set via --cd above.
-    cwd = process.env.USERPROFILE || process.env.SystemRoot || 'C:\\';
   } else {
     command = args.command || process.env.SHELL || '/bin/sh';
     spawnArgs = args.args;

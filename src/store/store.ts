@@ -11,7 +11,7 @@ export {
   pickAndAddProject,
   PASTEL_HUES,
 } from './projects';
-export { loadAgents, addAgentToTask, markAgentExited, restartAgent } from './agents';
+export { loadAgents, loadShells, addAgentToTask, markAgentExited, restartAgent } from './agents';
 export {
   createTask,
   createDirectTask,
@@ -62,7 +62,7 @@ export {
   sendActivePrompt,
   setSidebarFocusedProjectId,
 } from './focus';
-export type { PanelId, PendingAction } from './types';
+export type { PanelId, PendingAction, ShellType, ShellOption } from './types';
 export { saveState, loadState } from './persistence';
 export {
   getFontScale,

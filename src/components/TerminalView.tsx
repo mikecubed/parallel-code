@@ -12,6 +12,7 @@ import { isMac } from '../lib/platform';
 import { store } from '../store/store';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import type { PtyOutput } from '../ipc/types';
+import type { ShellType } from '../store/types';
 
 // Pre-computed base64 lookup table — avoids atob() intermediate string allocation.
 const B64_LOOKUP = new Uint8Array(128);
@@ -44,6 +45,7 @@ interface TerminalViewProps {
   args: string[];
   cwd: string;
   env?: Record<string, string>;
+  shellType?: ShellType;
   onExit?: (exitInfo: {
     exit_code: number | null;
     signal: string | null;
@@ -351,6 +353,7 @@ export function TerminalView(props: TerminalViewProps) {
       args: props.args,
       cwd: props.cwd,
       env: props.env ?? {},
+      shellType: props.shellType,
       cols: term.cols,
       rows: term.rows,
       onOutput,

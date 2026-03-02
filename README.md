@@ -18,7 +18,7 @@
   <img src="screens/longer-video.gif" alt="Parallel Code demo" width="800">
 </p>
 
-**Parallel Code** gives Claude Code, Codex CLI, and Gemini CLI each their own git branch and worktree — automatically. No agents stepping on each other's code, no juggling terminals, no mental overhead. Just one clean interface where you can see everything, navigate fast, merge results when they're ready — and monitor it all from your phone.
+**Parallel Code** gives Claude Code, Codex CLI, Gemini CLI, and GitHub Copilot each their own git branch and worktree — automatically. No agents stepping on each other's code, no juggling terminals, no mental overhead. Just one clean interface where you can see everything, navigate fast, merge results when they're ready — and monitor it all from your phone.
 
 ## Screenshots
 
@@ -55,7 +55,7 @@ This means you can have five agents working on five different features at the sa
 
 ### One interface, every AI coding agent
 
-Use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), and [Gemini CLI](https://github.com/google-gemini/gemini-cli) from the same interface. Switch between agents per task, or run all three at once — no juggling terminal windows.
+Use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [GitHub Copilot](https://www.npmjs.com/package/@github/copilot) from the same interface. Switch between agents per task, or run all four at once — no juggling terminal windows.
 
 ### 5 agents, 5 features, zero conflicts
 
@@ -86,7 +86,7 @@ Navigate panels, create tasks, send prompts, merge branches, push to remote — 
    - **Linux** — `.AppImage` or `.deb`
    - **Windows** — `.exe` installer (x64 or arm64) — see [Windows (via WSL2)](#windows-via-wsl2) below
 
-2. **Install at least one AI coding CLI:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+2. **Install at least one AI coding CLI:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [GitHub Copilot](https://www.npmjs.com/package/@github/copilot)
 
 3. **Open Parallel Code**, point it at a git repo, and start dispatching tasks.
 

@@ -5,13 +5,14 @@ import { store, setStore, updateWindowTitle } from './core';
 import { clearAgentActivity } from './taskStatus';
 import { triggerFocus, getTaskFocusedPanel } from './focus';
 import type { Terminal } from './types';
+import type { ShellType } from './types';
 
 let terminalCounter = 0;
 let lastCreateTime = 0;
 
 const REMOVE_ANIMATION_MS = 300;
 
-export function createTerminal(): void {
+export function createTerminal(shellType?: ShellType): void {
   const now = Date.now();
   if (now - lastCreateTime < 300) return;
   lastCreateTime = now;
@@ -21,7 +22,7 @@ export function createTerminal(): void {
   const agentId = crypto.randomUUID();
   const name = `Terminal ${terminalCounter}`;
 
-  const terminal: Terminal = { id, name, agentId };
+  const terminal: Terminal = { id, name, agentId, shellType };
 
   setStore('terminals', id, terminal);
   setStore('taskOrder', store.taskOrder.length, id);

@@ -1,12 +1,14 @@
-import { onMount, onCleanup } from 'solid-js';
+import { onMount, onCleanup, createSignal, Show, For } from 'solid-js';
 import { toggleNewTaskDialog, createTerminal, store, unfocusPlaceholder } from '../store/store';
 import { registerFocusFn, unregisterFocusFn } from '../store/focus';
 import { theme } from '../lib/theme';
 import { mod } from '../lib/platform';
+import type { ShellType } from '../store/types';
 
 export function NewTaskPlaceholder() {
   let addTaskRef: HTMLDivElement | undefined;
   let addTerminalRef: HTMLDivElement | undefined;
+  const [shellMenuOpen, setShellMenuOpen] = createSignal(false);
 
   onMount(() => {
     registerFocusFn('placeholder:add-task', () => addTaskRef?.focus());
@@ -28,6 +30,21 @@ export function NewTaskPlaceholder() {
 
   const focusedBg = (btn: 'add-task' | 'add-terminal') =>
     isFocused(btn) ? `color-mix(in srgb, ${theme.accent} 8%, transparent)` : undefined;
+
+  function handleTerminalClick() {
+    if (store.availableShells.length > 1) {
+      setShellMenuOpen((open) => !open);
+    } else {
+      unfocusPlaceholder();
+      createTerminal();
+    }
+  }
+
+  function pickShell(id: ShellType) {
+    setShellMenuOpen(false);
+    unfocusPlaceholder();
+    createTerminal(id);
+  }
 
   return (
     <div
@@ -75,38 +92,95 @@ export function NewTaskPlaceholder() {
       </div>
 
       {/* Terminal button — same width, fixed height */}
-      <div
-        ref={addTerminalRef}
-        class="new-task-placeholder"
-        role="button"
-        tabIndex={0}
-        aria-label="New terminal"
-        onClick={() => createTerminal()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            unfocusPlaceholder();
-            createTerminal();
-          }
-        }}
-        style={{
-          height: '44px',
-          display: 'flex',
-          'align-items': 'center',
-          'justify-content': 'center',
-          cursor: 'pointer',
-          'border-radius': '10px',
-          border: focusedBorder('add-terminal'),
-          color: focusedColor('add-terminal'),
-          background: focusedBg('add-terminal'),
-          'font-size': '13px',
-          'font-family': 'monospace',
-          'user-select': 'none',
-          'flex-shrink': '0',
-        }}
-        title={`New terminal (${mod}+Shift+D)`}
-      >
-        &gt;_
+      <div style={{ position: 'relative' }}>
+        <div
+          ref={addTerminalRef}
+          class="new-task-placeholder"
+          role="button"
+          tabIndex={0}
+          aria-label="New terminal"
+          aria-haspopup={store.availableShells.length > 1 ? 'listbox' : undefined}
+          aria-expanded={store.availableShells.length > 1 ? shellMenuOpen() : undefined}
+          onClick={handleTerminalClick}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleTerminalClick();
+            }
+            if (e.key === 'Escape' && shellMenuOpen()) {
+              e.preventDefault();
+              setShellMenuOpen(false);
+            }
+          }}
+          style={{
+            height: '44px',
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'center',
+            cursor: 'pointer',
+            'border-radius': '10px',
+            border: focusedBorder('add-terminal'),
+            color: focusedColor('add-terminal'),
+            background: focusedBg('add-terminal'),
+            'font-size': '13px',
+            'font-family': 'monospace',
+            'user-select': 'none',
+            'flex-shrink': '0',
+          }}
+          title={`New terminal (${mod}+Shift+D)`}
+        >
+          &gt;_
+        </div>
+
+        {/* Shell picker dropdown — only shown on Windows with multiple shells */}
+        <Show when={shellMenuOpen()}>
+          <div
+            role="listbox"
+            style={{
+              position: 'absolute',
+              bottom: 'calc(100% + 4px)',
+              left: '0',
+              'min-width': '180px',
+              background: theme.bgElevated,
+              border: `1px solid ${theme.border}`,
+              'border-radius': '8px',
+              'box-shadow': '0 8px 24px rgba(0,0,0,0.4)',
+              padding: '4px',
+              'z-index': '20',
+            }}
+          >
+            <For each={store.availableShells}>
+              {(shell) => (
+                <button
+                  type="button"
+                  role="option"
+                  onClick={() => pickShell(shell.id)}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    border: 'none',
+                    'border-radius': '6px',
+                    padding: '7px 10px',
+                    color: theme.fg,
+                    'font-size': '12px',
+                    'text-align': 'left',
+                    cursor: 'pointer',
+                    'white-space': 'nowrap',
+                  }}
+                  onMouseEnter={(e) =>
+                    ((e.currentTarget as HTMLButtonElement).style.background =
+                      `color-mix(in srgb, ${theme.accent} 10%, transparent)`)
+                  }
+                  onMouseLeave={(e) =>
+                    ((e.currentTarget as HTMLButtonElement).style.background = 'transparent')
+                  }
+                >
+                  {shell.label}
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
     </div>
   );
