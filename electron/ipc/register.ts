@@ -206,7 +206,8 @@ export function registerAllHandlers(win: BrowserWindow): void {
     if (args?.multiple) properties.push('multiSelections');
     const result = await dialog.showOpenDialog(win, { properties });
     if (result.canceled) return null;
-    const toPath = (p: string) => (process.platform === 'win32' ? toWslPath(p) : p);
+    const toPath = (p: string) =>
+      process.platform === 'win32' && process.env.WSL_DISTRO ? toWslPath(p) : p;
     if (args?.multiple) return result.filePaths.map(toPath);
     return toPath(result.filePaths[0] ?? '') || null;
   });

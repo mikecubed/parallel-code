@@ -17,6 +17,18 @@ function fsPath(p: string): string {
 }
 
 /**
+ * On PowerShell-only Windows (no WSL), convert any stored POSIX path
+ * (e.g. /mnt/c/Users/...) to a Windows path for use with native git args.
+ * Uses forward slashes so git accepts the path cross-platform.
+ * Returns the path unchanged on all other platforms or when WSL is active.
+ */
+function toNativePath(p: string): string {
+  if (process.platform !== 'win32' || process.env.WSL_DISTRO) return p;
+  if (!p.startsWith('/')) return p; // already a Windows path
+  return toWinPath(p, '').replace(/\\/g, '/');
+}
+
+/**
  * Join path segments using POSIX separators.
  * All stored paths are POSIX on Windows too, so path.join (win32) would
  * produce wrong separators.
@@ -29,10 +41,9 @@ function pjoin(...parts: string[]): string {
 }
 
 /**
- * Execute a git command, delegating through wsl.exe on Windows so that git
- * runs inside the WSL2 distro rather than Windows git.
- * All call sites that previously used `exec('git', args, { cwd })` should use
- * this helper instead.
+ * Execute a git command, delegating through wsl.exe on Windows when WSL2 is
+ * available so that git runs inside the WSL2 distro rather than Windows git.
+ * When WSL2 is absent (PowerShell-only), native Windows git is used directly.
  */
 async function gitExec(
   args: string[],
@@ -42,14 +53,22 @@ async function gitExec(
   const maxBuffer = options?.maxBuffer ?? MAX_BUFFER;
 
   if (process.platform === 'win32') {
-    // On Windows, Node.js interprets the `cwd` option as a Windows-native path.
-    // We can't pass a WSL path (/mnt/c/...) as cwd to a Windows process.
-    // Instead, use `git -C <wslCwd>` to set the working directory inside WSL.
-    const wslArgs = cwd ? ['-C', toWslPath(cwd), ...args] : args;
-    return execFileRaw('wsl.exe', ['git', ...wslArgs], {
-      maxBuffer,
-      encoding: 'utf8',
-    });
+    if (process.env.WSL_DISTRO) {
+      // WSL2 available — run git inside the distro.
+      // Node.js can't use a WSL path as cwd for a Windows process, so pass
+      // the working directory via `git -C <wslCwd>` instead.
+      const wslArgs = cwd ? ['-C', toWslPath(cwd), ...args] : args;
+      return execFileRaw('wsl.exe', ['git', ...wslArgs], {
+        maxBuffer,
+        encoding: 'utf8',
+      });
+    } else {
+      // PowerShell-only — use native Windows git.
+      // Stored paths may be POSIX (/mnt/c/...) from a previous WSL setup;
+      // convert them to Windows paths before passing as cwd.
+      const winCwd = cwd ? toNativePath(cwd) : undefined;
+      return execFileRaw('git', args, { cwd: winCwd, maxBuffer, encoding: 'utf8' });
+    }
   }
 
   return execFileRaw('git', args, { cwd, maxBuffer, encoding: 'utf8' });
@@ -260,12 +279,14 @@ export async function createWorktree(
   symlinkDirs: string[],
 ): Promise<{ path: string; branch: string }> {
   const worktreePath = `${repoRoot}/.worktrees/${branchName}`;
+  // On PowerShell-only Windows, git args must use Windows-style paths.
+  const gitWorktreePath = toNativePath(worktreePath);
 
   // Try -b first (new branch), fall back to existing branch
   try {
-    await gitExec(['worktree', 'add', '-b', branchName, worktreePath], { cwd: repoRoot });
+    await gitExec(['worktree', 'add', '-b', branchName, gitWorktreePath], { cwd: repoRoot });
   } catch {
-    await gitExec(['worktree', 'add', worktreePath, branchName], { cwd: repoRoot });
+    await gitExec(['worktree', 'add', gitWorktreePath, branchName], { cwd: repoRoot });
   }
 
   // Symlink selected directories
@@ -277,8 +298,13 @@ export async function createWorktree(
     try {
       if (fs.statSync(fsPath(source)).isDirectory() && !fs.existsSync(fsPath(target))) {
         if (process.platform === 'win32') {
-          // fs.symlinkSync can't resolve POSIX paths; create the symlink inside WSL.
-          await execFileRaw('wsl.exe', ['ln', '-sf', source, target]);
+          if (process.env.WSL_DISTRO) {
+            // fs.symlinkSync can't resolve POSIX paths; create the symlink inside WSL.
+            await execFileRaw('wsl.exe', ['ln', '-sf', source, target]);
+          } else {
+            // PowerShell-only: use a junction (no Developer Mode required for directories).
+            fs.symlinkSync(fsPath(source), fsPath(target), 'junction');
+          }
         } else {
           fs.symlinkSync(source, target);
         }
@@ -297,12 +323,13 @@ export async function removeWorktree(
   deleteBranch: boolean,
 ): Promise<void> {
   const worktreePath = `${repoRoot}/.worktrees/${branchName}`;
+  const gitWorktreePath = toNativePath(worktreePath);
 
   if (!fs.existsSync(fsPath(repoRoot))) return;
 
   if (fs.existsSync(fsPath(worktreePath))) {
     try {
-      await gitExec(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
+      await gitExec(['worktree', 'remove', '--force', gitWorktreePath], { cwd: repoRoot });
     } catch {
       // Fallback: direct directory removal
       fs.rmSync(fsPath(worktreePath), { recursive: true, force: true });

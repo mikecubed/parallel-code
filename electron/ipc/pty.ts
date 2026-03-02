@@ -1,7 +1,7 @@
 import * as pty from 'node-pty';
 import type { BrowserWindow } from 'electron';
 import { RingBuffer } from '../remote/ring-buffer.js';
-import { toWslPath } from '../lib/wsl.js';
+import { toWslPath, toWinPath } from '../lib/wsl.js';
 
 interface PtySession {
   proc: pty.IPty;
@@ -81,8 +81,10 @@ export function spawnAgent(
         // Agent or custom command — invoke directly in PowerShell
         spawnArgs = ['-NoLogo', '-Command', innerCommand, ...args.args];
       }
-      // Use the provided Windows path directly (no WSL translation)
-      cwd = args.cwd || process.env.USERPROFILE || 'C:\\';
+      // Use the provided path, converting any stored POSIX paths (e.g. /mnt/c/...)
+      // back to Windows paths for node-pty which runs as a native Windows process.
+      const rawCwd = args.cwd || process.env.USERPROFILE || 'C:\\';
+      cwd = rawCwd.startsWith('/') ? toWinPath(rawCwd, '') : rawCwd;
     } else {
       // WSL2 branch (default)
       command = 'wsl.exe';
