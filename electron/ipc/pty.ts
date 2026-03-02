@@ -83,11 +83,13 @@ export function spawnAgent(
         process.env.WSL_PATH ? ['env', `PATH=${process.env.WSL_PATH}`] : [];
       spawnArgs = ['--cd', wslCwd, '--', ...envPrefix, innerCommand, ...args.args];
     } else {
-      // Agent commands (claude, codex, etc.): wrap in `bash -l` so that
-      // .profile (and .bashrc via Ubuntu's default .profile) are sourced,
-      // matching the PATH used by an interactive terminal. Using -i with -c
-      // breaks positional parameter passing for `exec "$@"`.
-      spawnArgs = ['--cd', wslCwd, '--', 'bash', '-lc', 'exec "$@"', '_', innerCommand, ...args.args];
+      // Agent commands (claude, codex, etc.): wrap in `bash --login -c` so
+      // .profile/.bashrc are sourced and PATH includes ~/.local/bin etc.
+      // We embed the command directly in the -c script using single-quoted
+      // args to avoid Windows CreateProcess double-quote mangling of "$@".
+      const singleQuote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+      const cmdScript = [innerCommand, ...args.args].map(singleQuote).join(' ');
+      spawnArgs = ['--cd', wslCwd, '--', 'bash', '--login', '-c', cmdScript];
     }
     // node-pty on Windows needs a valid Windows path for cwd; the actual
     // WSL working directory is set via --cd above.
