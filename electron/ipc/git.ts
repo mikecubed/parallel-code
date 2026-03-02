@@ -8,6 +8,24 @@ const execFileRaw = promisify(execFile);
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 
 /**
+ * On Windows, a PTY process may still be alive (and holding a directory handle)
+ * for a brief window after being signalled. Retry with backoff before giving up.
+ */
+async function rmDirWithRetry(p: string, maxAttempts = 4, baseDelayMs = 250): Promise<void> {
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      fs.rmSync(p, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      lastErr = e;
+      await new Promise<void>((r) => setTimeout(r, baseDelayMs * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Convert a POSIX path to a Windows-accessible path for Node.js fs operations.
  * On non-Windows platforms the path is returned unchanged.
  */
@@ -256,7 +274,9 @@ async function computeBranchDiffStats(
   mainBranch: string,
   branchName: string,
 ): Promise<{ linesAdded: number; linesRemoved: number }> {
-  const { stdout } = await gitExec(['diff', '--numstat', `${mainBranch}..${branchName}`], {
+  // Use '--' to unambiguously separate revisions from paths (avoids git
+  // "ambiguous argument" error when branch names look like file paths).
+  const { stdout } = await gitExec(['diff', '--numstat', `${mainBranch}..${branchName}`, '--'], {
     cwd: projectRoot,
     maxBuffer: MAX_BUFFER,
   });
@@ -331,8 +351,14 @@ export async function removeWorktree(
     try {
       await gitExec(['worktree', 'remove', '--force', gitWorktreePath], { cwd: repoRoot });
     } catch {
-      // Fallback: direct directory removal
-      fs.rmSync(fsPath(worktreePath), { recursive: true, force: true });
+      // git worktree remove may fail on Windows when the PTY process still holds
+      // a handle to the directory (it was just killed but hasn't fully exited).
+      // Retry with backoff; fall back to immediate rmSync on non-Windows.
+      if (process.platform === 'win32') {
+        await rmDirWithRetry(fsPath(worktreePath));
+      } else {
+        fs.rmSync(fsPath(worktreePath), { recursive: true, force: true });
+      }
     }
   }
 
@@ -618,11 +644,12 @@ export async function mergeTask(
 
   return withWorktreeLock(lockKey, async () => {
     const mainBranch = await detectMainBranch(projectRoot);
+    // Diff stats are cosmetic — don't let a failure here block the merge.
     const { linesAdded, linesRemoved } = await computeBranchDiffStats(
       projectRoot,
       mainBranch,
       branchName,
-    );
+    ).catch(() => ({ linesAdded: 0, linesRemoved: 0 }));
 
     // Verify clean working tree
     const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
