@@ -47,6 +47,7 @@ export interface Task {
   directMode?: boolean;
   skipPermissions?: boolean;
   githubUrl?: string;
+  shellType?: ShellType;
 }
 
 export interface Terminal {

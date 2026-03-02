@@ -9,7 +9,7 @@ import { markAgentSpawned, clearAgentActivity, rescheduleTaskStatusPolling } fro
 import { recordMergedLines, recordTaskCompleted } from './completion';
 import type { AgentDef, CreateTaskResult, MergeResult } from '../ipc/types';
 import { parseGitHubUrl, taskNameFromGitHubUrl } from '../lib/github-url';
-import type { Agent, Task } from './types';
+import type { Agent, Task, ShellType } from './types';
 
 const AGENT_WRITE_READY_TIMEOUT_MS = 8_000;
 const AGENT_WRITE_RETRY_MS = 50;
@@ -51,6 +51,7 @@ export async function createTask(
   branchPrefixOverride?: string,
   githubUrl?: string,
   skipPermissions?: boolean,
+  shellType?: ShellType,
 ): Promise<string> {
   const projectRoot = getProjectPath(projectId);
   if (!projectRoot) throw new Error('Project not found');
@@ -78,6 +79,7 @@ export async function createTask(
     skipPermissions: skipPermissions || undefined,
     githubUrl,
     savedInitialPrompt: initialPrompt || undefined,
+    shellType,
   };
 
   const agent: Agent = {
@@ -119,6 +121,7 @@ export async function createDirectTask(
   initialPrompt?: string,
   githubUrl?: string,
   skipPermissions?: boolean,
+  shellType?: ShellType,
 ): Promise<string> {
   if (hasDirectModeTask(projectId)) {
     throw new Error('A direct-mode task already exists for this project');
@@ -144,6 +147,7 @@ export async function createDirectTask(
     directMode: true,
     skipPermissions: skipPermissions || undefined,
     githubUrl,
+    shellType,
   };
 
   const agent: Agent = {

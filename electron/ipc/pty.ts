@@ -68,7 +68,7 @@ export function spawnAgent(
   let cwd: string;
 
   if (process.platform === 'win32') {
-    const shellType = args.shellType ?? 'wsl2';
+    const shellType = args.shellType ?? (process.env.WSL_DISTRO ? 'wsl2' : 'pwsh');
 
     if (shellType === 'pwsh' || shellType === 'powershell') {
       // PowerShell branch — spawn directly, no WSL translation needed.
