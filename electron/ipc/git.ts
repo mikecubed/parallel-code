@@ -538,11 +538,16 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
 export async function getWorktreeStatus(
   worktreePath: string,
 ): Promise<{ has_committed_changes: boolean; has_uncommitted_changes: boolean }> {
-  const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
-    cwd: worktreePath,
-    maxBuffer: MAX_BUFFER,
-  });
-  const hasUncommittedChanges = statusOut.trim().length > 0;
+  let hasUncommittedChanges = false;
+  try {
+    const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
+      cwd: worktreePath,
+      maxBuffer: MAX_BUFFER,
+    });
+    hasUncommittedChanges = statusOut.trim().length > 0;
+  } catch (e) {
+    console.error('[getWorktreeStatus] git status failed:', e);
+  }
 
   const mainBranch = await detectMainBranch(worktreePath).catch(() => 'HEAD');
   let hasCommittedChanges = false;
@@ -552,7 +557,16 @@ export async function getWorktreeStatus(
     });
     hasCommittedChanges = logOut.trim().length > 0;
   } catch {
-    /* ignore */
+    // mainBranch ref may not exist yet (fresh repo with no commits on main/master).
+    // Fall back: if HEAD has any commits at all, there is something to merge.
+    try {
+      const { stdout: countOut } = await gitExec(['rev-list', '--count', 'HEAD'], {
+        cwd: worktreePath,
+      });
+      hasCommittedChanges = parseInt(countOut.trim(), 10) > 0;
+    } catch (e) {
+      console.error('[getWorktreeStatus] git rev-list fallback failed:', e);
+    }
   }
 
   return {
