@@ -34,8 +34,9 @@ import {
   removeWorktree,
 } from './git.js';
 import { createTask, deleteTask } from './tasks.js';
-import { listAgents } from './agents.js';
+import { listAgents, listShells } from './agents.js';
 import { saveAppState, loadAppState } from './persistence.js';
+import { toWslPath } from '../lib/wsl.js';
 import { spawn } from 'child_process';
 import path from 'path';
 import {
@@ -50,7 +51,9 @@ import {
 /** Reject paths that are non-absolute or attempt directory traversal. */
 function validatePath(p: unknown, label: string): void {
   if (typeof p !== 'string') throw new Error(`${label} must be a string`);
-  if (!path.isAbsolute(p)) throw new Error(`${label} must be absolute`);
+  const isAbsolute =
+    path.isAbsolute(p) || (process.platform === 'win32' && /^[A-Za-z]:[/\\]/.test(p));
+  if (!isAbsolute) throw new Error(`${label} must be absolute`);
   if (p.includes('..')) throw new Error(`${label} must not contain ".."`);
 }
 
@@ -104,6 +107,7 @@ export function registerAllHandlers(win: BrowserWindow): void {
 
   // --- Agent commands ---
   ipcMain.handle(IPC.ListAgents, () => listAgents());
+  ipcMain.handle(IPC.GetAvailableShells, () => listShells());
 
   // --- Task commands ---
   ipcMain.handle(IPC.CreateTask, (_e, args) => {
@@ -316,7 +320,10 @@ export function registerAllHandlers(win: BrowserWindow): void {
     if (args?.multiple) properties.push('multiSelections');
     const result = await dialog.showOpenDialog(win, { properties });
     if (result.canceled) return null;
-    return args?.multiple ? result.filePaths : (result.filePaths[0] ?? null);
+    const toPath = (p: string) =>
+      process.platform === 'win32' && process.env.WSL_DISTRO ? toWslPath(p) : p;
+    if (args?.multiple) return result.filePaths.map(toPath);
+    return toPath(result.filePaths[0] ?? '') || null;
   });
 
   // --- Shell/Opener ---

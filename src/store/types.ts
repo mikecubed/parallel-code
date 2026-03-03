@@ -1,4 +1,4 @@
-import type { AgentDef, WorktreeStatus } from '../ipc/types';
+import type { AgentDef, WorktreeStatus, ShellOption, ShellType } from '../ipc/types';
 import type { TerminalFont } from '../lib/fonts';
 import type { LookPreset } from '../lib/look';
 
@@ -48,6 +48,7 @@ export interface Task {
   directMode?: boolean;
   skipPermissions?: boolean;
   githubUrl?: string;
+  shellType?: ShellType;
   collapsed?: boolean;
   savedAgentDef?: AgentDef;
 }
@@ -56,6 +57,7 @@ export interface Terminal {
   id: string;
   name: string;
   agentId: string;
+  shellType?: ShellType;
   closingStatus?: 'closing' | 'removing';
 }
 
@@ -119,6 +121,8 @@ export interface PersistedState {
 // The shell toolbar is "shell-toolbar".
 export type PanelId = string;
 
+export type { ShellType, ShellOption };
+
 export interface PendingAction {
   type: 'close' | 'merge' | 'push';
   taskId: string;
@@ -146,6 +150,7 @@ export interface AppStore {
   activeTaskId: string | null;
   activeAgentId: string | null;
   availableAgents: AgentDef[];
+  availableShells: ShellOption[];
   customAgents: AgentDef[];
   showNewTaskDialog: boolean;
   sidebarVisible: boolean;

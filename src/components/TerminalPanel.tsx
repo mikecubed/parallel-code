@@ -147,6 +147,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
             command=""
             args={['-l']}
             cwd=""
+            shellType={props.terminal.shellType}
             onReady={(focusFn) => registerFocusFn(`${props.terminal.id}:terminal`, focusFn)}
             fontSize={Math.round(13 * getFontScale(`${props.terminal.id}:terminal`))}
             autoFocus

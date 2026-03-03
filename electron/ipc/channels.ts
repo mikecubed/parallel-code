@@ -9,6 +9,7 @@ export enum IPC {
   CountRunningAgents = 'count_running_agents',
   KillAllAgents = 'kill_all_agents',
   ListAgents = 'list_agents',
+  GetAvailableShells = 'get_available_shells',
 
   // Task
   CreateTask = 'create_task',

@@ -15,7 +15,7 @@ import {
 import { recordMergedLines, recordTaskCompleted } from './completion';
 import type { AgentDef, CreateTaskResult, MergeResult } from '../ipc/types';
 import { parseGitHubUrl, taskNameFromGitHubUrl } from '../lib/github-url';
-import type { Agent, Task } from './types';
+import type { Agent, Task, ShellType } from './types';
 
 const AGENT_WRITE_READY_TIMEOUT_MS = 8_000;
 const AGENT_WRITE_RETRY_MS = 50;
@@ -57,6 +57,7 @@ export interface CreateTaskOptions {
   branchPrefixOverride?: string;
   githubUrl?: string;
   skipPermissions?: boolean;
+  shellType?: ShellType;
 }
 
 export async function createTask(opts: CreateTaskOptions): Promise<string> {
@@ -68,6 +69,7 @@ export async function createTask(opts: CreateTaskOptions): Promise<string> {
     initialPrompt,
     githubUrl,
     skipPermissions,
+    shellType,
   } = opts;
   const projectRoot = getProjectPath(projectId);
   if (!projectRoot) throw new Error('Project not found');
@@ -96,6 +98,7 @@ export async function createTask(opts: CreateTaskOptions): Promise<string> {
     skipPermissions: skipPermissions || undefined,
     githubUrl,
     savedInitialPrompt: initialPrompt || undefined,
+    shellType,
   };
 
   const agent: Agent = {
@@ -137,10 +140,11 @@ export interface CreateDirectTaskOptions {
   initialPrompt?: string;
   githubUrl?: string;
   skipPermissions?: boolean;
+  shellType?: ShellType;
 }
 
 export async function createDirectTask(opts: CreateDirectTaskOptions): Promise<string> {
-  const { name, agentDef, projectId, mainBranch, initialPrompt, githubUrl, skipPermissions } = opts;
+  const { name, agentDef, projectId, mainBranch, initialPrompt, githubUrl, skipPermissions, shellType } = opts;
   if (hasDirectModeTask(projectId)) {
     throw new Error('A direct-mode task already exists for this project');
   }
@@ -166,6 +170,7 @@ export async function createDirectTask(opts: CreateDirectTaskOptions): Promise<s
     directMode: true,
     skipPermissions: skipPermissions || undefined,
     githubUrl,
+    shellType,
   };
 
   const agent: Agent = {

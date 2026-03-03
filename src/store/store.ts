@@ -16,6 +16,7 @@ export {
 } from './projects';
 export {
   loadAgents,
+  loadShells,
   addAgentToTask,
   markAgentExited,
   restartAgent,
@@ -77,7 +78,7 @@ export {
   sendActivePrompt,
   setSidebarFocusedProjectId,
 } from './focus';
-export type { PanelId, PendingAction } from './types';
+export type { PanelId, PendingAction, ShellType, ShellOption } from './types';
 export { saveState, loadState } from './persistence';
 export {
   getFontScale,

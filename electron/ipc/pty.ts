@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import type { BrowserWindow } from 'electron';
 import { RingBuffer } from '../remote/ring-buffer.js';
+import { toWslPath, toWinPath } from '../lib/wsl.js';
 
 interface PtySession {
   proc: pty.IPty;
@@ -66,9 +67,10 @@ export function validateCommand(command: string): void {
       );
     }
   }
-  // Bare names: resolve via `which` (execFileSync — no shell interpolation)
+  // Bare names: resolve via `which` on Unix/WSL, `where.exe` on PowerShell-only Windows
+  const finder = process.platform === 'win32' && !process.env.WSL_DISTRO ? 'where.exe' : 'which';
   try {
-    execFileSync('which', [command], { encoding: 'utf8', timeout: 3000 });
+    execFileSync(finder, [command], { encoding: 'utf8', timeout: 3000 });
   } catch {
     throw new Error(
       `Command '${command}' not found in PATH. Make sure it is installed and available in your terminal.`,
@@ -87,13 +89,72 @@ export function spawnAgent(
     env: Record<string, string>;
     cols: number;
     rows: number;
+    shellType?: 'wsl2' | 'pwsh' | 'powershell';
     isShell?: boolean;
     onOutput: { __CHANNEL_ID__: string };
   },
 ): void {
   const channelId = args.onOutput.__CHANNEL_ID__;
-  const command = args.command || process.env.SHELL || '/bin/sh';
-  const cwd = args.cwd || process.env.HOME || '/';
+
+  // On Windows, delegate to WSL2 via wsl.exe; shell defaults to bash since
+  // SHELL is not set in the Windows environment.
+  let command: string;
+  let spawnArgs: string[];
+  let cwd: string;
+
+  if (process.platform === 'win32') {
+    const shellType = args.shellType ?? (process.env.WSL_DISTRO ? 'wsl2' : 'pwsh');
+
+    if (shellType === 'pwsh' || shellType === 'powershell') {
+      // PowerShell branch — spawn directly, no WSL translation needed.
+      command = process.env.PS_EXE || (shellType === 'pwsh' ? 'pwsh.exe' : 'powershell.exe');
+      const innerCommand = args.command;
+      if (!innerCommand) {
+        // Interactive PowerShell shell
+        spawnArgs = ['-NoLogo'];
+      } else {
+        // Agent or custom command — invoke directly in PowerShell
+        spawnArgs = ['-NoLogo', '-Command', innerCommand, ...args.args];
+      }
+      // Use the provided path, converting any stored POSIX paths (e.g. /mnt/c/...)
+      // back to Windows paths for node-pty which runs as a native Windows process.
+      const rawCwd = args.cwd || process.env.USERPROFILE || 'C:\\';
+      cwd = rawCwd.startsWith('/') ? toWinPath(rawCwd, '') : rawCwd;
+    } else {
+      // WSL2 branch (default)
+      command = 'wsl.exe';
+      const innerCommand = args.command || 'bash';
+      // Use --cd to set the WSL working directory from the translated path
+      const wslCwd = toWslPath(args.cwd || process.env.HOME || '/');
+      const isShell =
+        innerCommand === 'bash' ||
+        innerCommand === 'sh' ||
+        innerCommand === '/bin/bash' ||
+        innerCommand === '/bin/sh';
+      if (isShell) {
+        // Shell commands: pass args directly; bash sources .bashrc as an
+        // interactive shell (PTY attached), giving it the correct PATH.
+        const envPrefix: string[] =
+          process.env.WSL_PATH ? ['env', `PATH=${process.env.WSL_PATH}`] : [];
+        spawnArgs = ['--cd', wslCwd, '--', ...envPrefix, innerCommand, ...args.args];
+      } else {
+        // Agent commands (claude, codex, copilot, etc.): wrap in `bash --login -c`
+        // so .profile/.bashrc are sourced and PATH includes ~/.local/bin etc.
+        // We embed the command directly in the -c script using single-quoted
+        // args to avoid Windows CreateProcess double-quote mangling of "$@".
+        const singleQuote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+        const cmdScript = [innerCommand, ...args.args].map(singleQuote).join(' ');
+        spawnArgs = ['--cd', wslCwd, '--', 'bash', '--login', '-c', cmdScript];
+      }
+      // node-pty on Windows needs a valid Windows path for cwd; the actual
+      // WSL working directory is set via --cd above.
+      cwd = process.env.USERPROFILE || process.env.SystemRoot || 'C:\\';
+    }
+  } else {
+    command = args.command || process.env.SHELL || '/bin/sh';
+    spawnArgs = args.args;
+    cwd = args.cwd || process.env.HOME || '/';
+  }
 
   // Reject commands with shell metacharacters (node-pty uses execvp, but
   // guard against accidental misuse). Allow bare names (resolved via PATH)
@@ -134,12 +195,18 @@ export function spawnAgent(
     ...safeEnvOverrides,
   };
 
+  // On Windows, merge WSL_PATH into PATH so agent CLIs installed in the WSL
+  // distro are discoverable inside the PTY session.
+  if (process.platform === 'win32' && process.env.WSL_PATH) {
+    spawnEnv.PATH = process.env.WSL_PATH;
+  }
+
   // Clear env vars that prevent nested agent sessions
   delete spawnEnv.CLAUDECODE;
   delete spawnEnv.CLAUDE_CODE_SESSION;
   delete spawnEnv.CLAUDE_CODE_ENTRYPOINT;
 
-  const proc = pty.spawn(command, args.args, {
+  const proc = pty.spawn(command, spawnArgs, {
     name: 'xterm-256color',
     cols: args.cols,
     rows: args.rows,
@@ -250,7 +317,10 @@ export function writeToAgent(agentId: string, data: string): void {
 export function resizeAgent(agentId: string, cols: number, rows: number): void {
   const session = sessions.get(agentId);
   if (!session) throw new Error(`Agent not found: ${agentId}`);
-  session.proc.resize(cols, rows);
+  // Guard against zero/negative dimensions (node-pty issue #877)
+  if (cols >= 1 && rows >= 1) {
+    session.proc.resize(cols, rows);
+  }
 }
 
 export function pauseAgent(agentId: string): void {

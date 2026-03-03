@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 'Publish as draft release'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -20,7 +26,8 @@ jobs:
         id: create
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || true }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.ref_name }}
           generate_release_notes: true
 
   build-linux:
@@ -45,6 +52,34 @@ jobs:
             release/*.AppImage
             release/*.deb
           draft: true
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build Windows installers
+        run: npm run build -- --win --publish never
+
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.exe
+          draft: true
+
+      - name: Cleanup
+        if: always()
+        run: Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
+        shell: powershell
 
   build-macos:
     needs: create-release

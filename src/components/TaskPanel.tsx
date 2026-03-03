@@ -761,6 +761,7 @@ export function TaskPanel(props: TaskPanelProps) {
                           command={getShellCommand()}
                           args={['-l']}
                           cwd={props.task.worktreePath}
+                          shellType={props.task.shellType}
                           initialCommand={initialCommand}
                           onData={(data) => markAgentOutput(shellId, data, props.task.id)}
                           onExit={(info) =>
@@ -910,6 +911,7 @@ export function TaskPanel(props: TaskPanelProps) {
                             : []),
                         ]}
                         cwd={props.task.worktreePath}
+                        shellType={props.task.shellType}
                         onExit={(code) => markAgentExited(a().id, code)}
                         onData={(data) => markAgentOutput(a().id, data, props.task.id)}
                         onPromptDetected={(text) => setLastPrompt(props.task.id, text)}

@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/Electron-47848F?logo=electron&logoColor=white" alt="Electron">
   <img src="https://img.shields.io/badge/SolidJS-2C4F7C?logo=solid&logoColor=white" alt="SolidJS">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows%20(WSL2)-lightgrey" alt="macOS | Linux | Windows (WSL2)">
   <img src="https://img.shields.io/github/license/johannesjo/parallel-code" alt="License">
 </p>
 
@@ -18,7 +18,7 @@
   <img src="screens/longer-video.gif" alt="Parallel Code demo" width="800">
 </p>
 
-**Parallel Code** gives Claude Code, Codex CLI, and Gemini CLI each their own git branch and worktree — automatically. No agents stepping on each other's code, no juggling terminals, no mental overhead. Just one clean interface where you can see everything, navigate fast, merge results when they're ready — and monitor it all from your phone.
+**Parallel Code** gives Claude Code, Codex CLI, Gemini CLI, and GitHub Copilot each their own git branch and worktree — automatically. No agents stepping on each other's code, no juggling terminals, no mental overhead. Just one clean interface where you can see everything, navigate fast, merge results when they're ready — and monitor it all from your phone.
 
 ## Screenshots
 
@@ -55,7 +55,7 @@ This means you can have five agents working on five different features at the sa
 
 ### One interface, every AI coding agent
 
-Use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), and [Gemini CLI](https://github.com/google-gemini/gemini-cli) from the same interface. Switch between agents per task, or run all three at once — no juggling terminal windows.
+Use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [GitHub Copilot](https://www.npmjs.com/package/@github/copilot) from the same interface. Switch between agents per task, or run all four at once — no juggling terminal windows.
 
 ### 5 agents, 5 features, zero conflicts
 
@@ -77,17 +77,43 @@ Navigate panels, create tasks, send prompts, merge branches, push to remote — 
 - Direct mode for working on the main branch without isolation
 - Six themes — Minimal, Graphite, Classic, Indigo, Ember, Glacier
 - State persists across restarts
-- macOS and Linux
+- macOS, Linux, and Windows (via WSL2)
 
 ## Getting Started
 
 1. **Download** the latest release for your platform from the [releases page](https://github.com/johannesjo/parallel-code/releases/latest):
    - **macOS** — `.dmg` (universal)
    - **Linux** — `.AppImage` or `.deb`
+   - **Windows** — `.exe` installer (x64 or arm64) — see [Windows (via WSL2)](#windows-via-wsl2) below
 
-2. **Install at least one AI coding CLI:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+2. **Install at least one AI coding CLI:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [GitHub Copilot](https://www.npmjs.com/package/@github/copilot)
 
 3. **Open Parallel Code**, point it at a git repo, and start dispatching tasks.
+
+## Windows (via WSL2)
+
+Parallel Code runs on Windows by delegating shell, git, and PTY operations to a WSL2 distro.
+
+**Requirements:**
+
+- Windows 10 21H2+ or Windows 11
+- WSL2 with a Linux distro installed: `wsl --install` (installs Ubuntu by default)
+- Your git repos stored in WSL-native storage (`/home/<user>/…`) for best performance — repos on `/mnt/c/…` suffer 10–50× slower git I/O and require Developer Mode for symlinks
+
+**Quick setup:**
+
+```sh
+# Inside your WSL terminal
+git clone https://github.com/johannesjo/parallel-code.git ~/projects/parallel-code
+cd ~/projects/parallel-code
+npm install
+```
+
+Then launch Parallel Code from Windows — it will detect WSL2 automatically.
+
+If WSL2 is not found, the app shows an error dialog with installation instructions instead of crashing.
+
+For full dev setup, see [`specs/001-windows-wsl-support/quickstart.md`](specs/001-windows-wsl-support/quickstart.md).
 
 <details>
 <summary><strong>Build from source</strong></summary>

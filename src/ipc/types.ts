@@ -5,6 +5,13 @@ export type PtyOutput =
       data: { exit_code: number | null; signal: string | null; last_output: string[] };
     };
 
+export type ShellType = 'wsl2' | 'pwsh' | 'powershell';
+
+export interface ShellOption {
+  id: ShellType;
+  label: string;
+}
+
 export interface AgentDef {
   id: string;
   name: string;
@@ -20,6 +27,7 @@ export interface CreateTaskResult {
   id: string;
   branch_name: string;
   worktree_path: string;
+  warnMountedDrive?: boolean;
 }
 
 export interface TaskInfo {

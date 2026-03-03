@@ -1,9 +1,124 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
-import path from 'path';
+import { toWslPath, toWinPath } from '../lib/wsl.js';
 
-const exec = promisify(execFile);
+const execFileRaw = promisify(execFile);
+
+const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
+
+/**
+ * On Windows, a PTY process may still be alive (and holding a directory handle)
+ * for a brief window after being signalled. Retry with backoff before giving up.
+ */
+async function rmDirWithRetry(p: string, maxAttempts = 4, baseDelayMs = 250): Promise<void> {
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      fs.rmSync(p, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      lastErr = e;
+      await new Promise<void>((r) => setTimeout(r, baseDelayMs * (i + 1)));
+    }
+  }
+
+  // fs.rmSync can fail with EPERM on Windows when git has marked .git object
+  // files as read-only. Try PowerShell's Remove-Item which handles this natively.
+  const psExe = process.env.PS_EXE || 'pwsh.exe';
+  try {
+    await execFileRaw(psExe, [
+      '-NoProfile',
+      '-Command',
+      `Remove-Item -Recurse -Force -Path '${p.replace(/'/g, "''")}'`,
+    ]);
+    return;
+  } catch {
+    /* fall through and throw the original error */
+  }
+
+  throw lastErr;
+}
+
+/**
+ * Convert a POSIX path to a Windows-accessible path for Node.js fs operations.
+ * On non-Windows platforms the path is returned unchanged.
+ */
+function fsPath(p: string): string {
+  if (process.platform !== 'win32') return p;
+  return toWinPath(p, process.env.WSL_DISTRO ?? 'Ubuntu');
+}
+
+/**
+ * On PowerShell-only Windows (no WSL), convert any stored POSIX path
+ * (e.g. /mnt/c/Users/...) to a Windows path for use with native git args.
+ * Uses forward slashes so git accepts the path cross-platform.
+ * Returns the path unchanged on all other platforms or when WSL is active.
+ */
+function toNativePath(p: string): string {
+  if (process.platform !== 'win32' || process.env.WSL_DISTRO) return p;
+  if (!p.startsWith('/')) return p; // already a Windows path
+  return toWinPath(p, '').replace(/\\/g, '/');
+}
+
+/**
+ * Join path segments using POSIX separators.
+ * All stored paths are POSIX on Windows too, so path.join (win32) would
+ * produce wrong separators.
+ */
+function pjoin(...parts: string[]): string {
+  return parts
+    .join('/')
+    .replace(/\/+/g, '/')
+    .replace(/^(.+)\/$/, '$1');
+}
+
+/**
+ * Execute a git command, delegating through wsl.exe on Windows when WSL2 is
+ * available so that git runs inside the WSL2 distro rather than Windows git.
+ * When WSL2 is absent (PowerShell-only), native Windows git is used directly.
+ */
+async function gitExec(
+  args: string[],
+  options?: { cwd?: string; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
+  const cwd = options?.cwd;
+  const maxBuffer = options?.maxBuffer ?? MAX_BUFFER;
+
+  if (process.platform === 'win32') {
+    if (process.env.WSL_DISTRO) {
+      // WSL2 available — run git inside the distro.
+      // Node.js can't use a WSL path as cwd for a Windows process, so pass
+      // the working directory via `git -C <wslCwd>` instead.
+      const wslArgs = cwd ? ['-C', toWslPath(cwd), ...args] : args;
+      return execFileRaw('wsl.exe', ['git', ...wslArgs], {
+        maxBuffer,
+        encoding: 'utf8',
+      });
+    } else {
+      // PowerShell-only — use native Windows git.
+      // Stored paths may be POSIX (/mnt/c/...) from a previous WSL setup;
+      // convert them to Windows paths before passing as cwd.
+      const winCwd = cwd ? toNativePath(cwd) : undefined;
+      return execFileRaw('git', args, { cwd: winCwd, maxBuffer, encoding: 'utf8' });
+    }
+  }
+
+  return execFileRaw('git', args, { cwd, maxBuffer, encoding: 'utf8' });
+}
+
+/**
+ * Thin exec wrapper used by upstream code: routes 'git' commands through
+ * gitExec (WSL-aware) and everything else through execFileRaw directly.
+ */
+async function exec(
+  command: string,
+  args: string[],
+  opts: { cwd?: string; maxBuffer?: number } = {},
+): Promise<{ stdout: string }> {
+  if (command === 'git') return gitExec(args, opts);
+  return execFileRaw(command, args, { encoding: 'utf8', ...opts });
+}
 
 // --- TTL Caches ---
 
@@ -16,7 +131,6 @@ const mainBranchCache = new Map<string, CacheEntry>();
 const mergeBaseCache = new Map<string, CacheEntry>();
 const MAIN_BRANCH_TTL = 60_000; // 60s
 const MERGE_BASE_TTL = 30_000; // 30s
-const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 
 function invalidateMergeBaseCache(): void {
   mergeBaseCache.clear();
@@ -78,7 +192,7 @@ async function detectMainBranch(repoRoot: string): Promise<string> {
 async function detectMainBranchUncached(repoRoot: string): Promise<string> {
   // Try remote HEAD reference first
   try {
-    const { stdout } = await exec('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+    const { stdout } = await gitExec(['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: repoRoot,
     });
     const refname = stdout.trim();
@@ -90,7 +204,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 
   // Check if 'main' exists
   try {
-    await exec('git', ['rev-parse', '--verify', 'main'], { cwd: repoRoot });
+    await gitExec(['rev-parse', '--verify', 'main'], { cwd: repoRoot });
     return 'main';
   } catch {
     /* ignore */
@@ -98,7 +212,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 
   // Fallback to 'master'
   try {
-    await exec('git', ['rev-parse', '--verify', 'master'], { cwd: repoRoot });
+    await gitExec(['rev-parse', '--verify', 'master'], { cwd: repoRoot });
     return 'master';
   } catch {
     /* ignore */
@@ -106,7 +220,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 
   // Empty repo (no commits yet) — use configured default branch or fall back to "main"
   try {
-    const { stdout } = await exec('git', ['config', '--get', 'init.defaultBranch'], {
+    const { stdout } = await gitExec(['config', '--get', 'init.defaultBranch'], {
       cwd: repoRoot,
     });
     const configured = stdout.trim();
@@ -119,7 +233,7 @@ async function detectMainBranchUncached(repoRoot: string): Promise<string> {
 }
 
 async function getCurrentBranchName(repoRoot: string): Promise<string> {
-  const { stdout } = await exec('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: repoRoot });
+  const { stdout } = await gitExec(['symbolic-ref', '--short', 'HEAD'], { cwd: repoRoot });
   return stdout.trim();
 }
 
@@ -134,7 +248,7 @@ async function detectMergeBase(repoRoot: string): Promise<string> {
   const mainBranch = await detectMainBranch(repoRoot);
   let result: string;
   try {
-    const { stdout } = await exec('git', ['merge-base', mainBranch, 'HEAD'], { cwd: repoRoot });
+    const { stdout } = await gitExec(['merge-base', mainBranch, 'HEAD'], { cwd: repoRoot });
     const hash = stdout.trim();
     result = hash || mainBranch;
   } catch {
@@ -146,11 +260,12 @@ async function detectMergeBase(repoRoot: string): Promise<string> {
 }
 
 async function detectRepoLockKey(p: string): Promise<string> {
-  const { stdout } = await exec('git', ['rev-parse', '--git-common-dir'], { cwd: p });
+  const { stdout } = await gitExec(['rev-parse', '--git-common-dir'], { cwd: p });
   const commonDir = stdout.trim();
-  const commonPath = path.isAbsolute(commonDir) ? commonDir : path.join(p, commonDir);
+  // All stored paths are POSIX; use pjoin to avoid win32 path.join inserting backslashes.
+  const commonPath = commonDir.startsWith('/') ? commonDir : pjoin(p, commonDir);
   try {
-    return fs.realpathSync(commonPath);
+    return fs.realpathSync(fsPath(commonPath));
   } catch {
     return commonPath;
   }
@@ -233,7 +348,9 @@ async function computeBranchDiffStats(
   mainBranch: string,
   branchName: string,
 ): Promise<{ linesAdded: number; linesRemoved: number }> {
-  const { stdout } = await exec('git', ['diff', '--numstat', `${mainBranch}..${branchName}`], {
+  // Use '--' to unambiguously separate revisions from paths (avoids git
+  // "ambiguous argument" error when branch names look like file paths).
+  const { stdout } = await gitExec(['diff', '--numstat', `${mainBranch}..${branchName}`, '--'], {
     cwd: projectRoot,
     maxBuffer: MAX_BUFFER,
   });
@@ -257,6 +374,8 @@ export async function createWorktree(
   forceClean = false,
 ): Promise<{ path: string; branch: string }> {
   const worktreePath = `${repoRoot}/.worktrees/${branchName}`;
+  // On PowerShell-only Windows, git args must use Windows-style paths.
+  const gitWorktreePath = toNativePath(worktreePath);
 
   if (forceClean) {
     // Clean up stale worktree/branch from a previous session that wasn't properly removed
@@ -264,7 +383,11 @@ export async function createWorktree(
       try {
         await exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
       } catch {
-        fs.rmSync(worktreePath, { recursive: true, force: true });
+        if (process.platform === 'win32') {
+          await rmDirWithRetry(fsPath(worktreePath));
+        } else {
+          fs.rmSync(worktreePath, { recursive: true, force: true });
+        }
       }
       await exec('git', ['worktree', 'prune'], { cwd: repoRoot }).catch(() => {});
     }
@@ -277,18 +400,33 @@ export async function createWorktree(
     }
   }
 
-  // Create fresh worktree with new branch
-  await exec('git', ['worktree', 'add', '-b', branchName, worktreePath], { cwd: repoRoot });
+  // Try -b first (new branch), fall back to existing branch
+  try {
+    await gitExec(['worktree', 'add', '-b', branchName, gitWorktreePath], { cwd: repoRoot });
+  } catch {
+    await gitExec(['worktree', 'add', gitWorktreePath, branchName], { cwd: repoRoot });
+  }
 
   // Symlink selected directories
   for (const name of symlinkDirs) {
     // Reject names that could escape the worktree directory
     if (name.includes('/') || name.includes('\\') || name.includes('..') || name === '.') continue;
-    const source = path.join(repoRoot, name);
-    const target = path.join(worktreePath, name);
+    const source = pjoin(repoRoot, name);
+    const target = pjoin(worktreePath, name);
     try {
-      if (fs.existsSync(source) && !fs.existsSync(target)) {
-        fs.symlinkSync(source, target);
+      if (fs.existsSync(fsPath(source)) && !fs.existsSync(fsPath(target))) {
+        if (process.platform === 'win32') {
+          if (process.env.WSL_DISTRO) {
+            // fs.symlinkSync can't resolve POSIX paths; create the symlink inside WSL.
+            await execFileRaw('wsl.exe', ['ln', '-sf', source, target]);
+          } else if (fs.statSync(fsPath(source)).isDirectory()) {
+            // PowerShell-only: use a junction (no Developer Mode required for directories).
+            fs.symlinkSync(fsPath(source), fsPath(target), 'junction');
+          }
+          // Skip file symlinks on PowerShell-only Windows (requires Developer Mode)
+        } else {
+          fs.symlinkSync(source, target);
+        }
       }
     } catch {
       /* ignore */
@@ -304,28 +442,35 @@ export async function removeWorktree(
   deleteBranch: boolean,
 ): Promise<void> {
   const worktreePath = `${repoRoot}/.worktrees/${branchName}`;
+  const gitWorktreePath = toNativePath(worktreePath);
 
-  if (!fs.existsSync(repoRoot)) return;
+  if (!fs.existsSync(fsPath(repoRoot))) return;
 
-  if (fs.existsSync(worktreePath)) {
+  if (fs.existsSync(fsPath(worktreePath))) {
     try {
-      await exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
+      await gitExec(['worktree', 'remove', '--force', gitWorktreePath], { cwd: repoRoot });
     } catch {
-      // Fallback: direct directory removal
-      fs.rmSync(worktreePath, { recursive: true, force: true });
+      // git worktree remove may fail on Windows when the PTY process still holds
+      // a handle to the directory (it was just killed but hasn't fully exited).
+      // Retry with backoff; fall back to immediate rmSync on non-Windows.
+      if (process.platform === 'win32') {
+        await rmDirWithRetry(fsPath(worktreePath));
+      } else {
+        fs.rmSync(fsPath(worktreePath), { recursive: true, force: true });
+      }
     }
   }
 
   // Prune stale worktree entries
   try {
-    await exec('git', ['worktree', 'prune'], { cwd: repoRoot });
+    await gitExec(['worktree', 'prune'], { cwd: repoRoot });
   } catch {
     /* ignore */
   }
 
   if (deleteBranch) {
     try {
-      await exec('git', ['branch', '-D', '--', branchName], { cwd: repoRoot });
+      await gitExec(['branch', '-D', '--', branchName], { cwd: repoRoot });
     } catch (e: unknown) {
       const msg = String(e);
       if (!msg.toLowerCase().includes('not found')) throw e;
@@ -338,14 +483,14 @@ export async function removeWorktree(
 export async function getGitIgnoredDirs(projectRoot: string): Promise<string[]> {
   const results: string[] = [];
   for (const name of SYMLINK_CANDIDATES) {
-    const dirPath = path.join(projectRoot, name);
+    const dirPath = pjoin(projectRoot, name);
     try {
-      fs.statSync(dirPath); // throws if entry doesn't exist
+      fs.statSync(fsPath(dirPath)); // throws if entry doesn't exist
     } catch {
       continue;
     }
     try {
-      await exec('git', ['check-ignore', '-q', name], { cwd: projectRoot });
+      await gitExec(['check-ignore', '-q', name], { cwd: projectRoot });
       results.push(name);
     } catch {
       /* not ignored */
@@ -376,7 +521,7 @@ export async function getChangedFiles(worktreePath: string): Promise<
   // git diff --raw --numstat <base>
   let diffStr = '';
   try {
-    const { stdout } = await exec('git', ['diff', '--raw', '--numstat', base], {
+    const { stdout } = await gitExec(['diff', '--raw', '--numstat', base], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -390,7 +535,7 @@ export async function getChangedFiles(worktreePath: string): Promise<
   // git status --porcelain for uncommitted paths
   let statusStr = '';
   try {
-    const { stdout } = await exec('git', ['status', '--porcelain'], {
+    const { stdout } = await gitExec(['status', '--porcelain'], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -429,12 +574,12 @@ export async function getChangedFiles(worktreePath: string): Promise<
   // Files from statusMap not in numstat (untracked)
   for (const [p, status] of statusMap) {
     if (seen.has(p)) continue;
-    const fullPath = path.join(worktreePath, p);
+    const fullPath = pjoin(worktreePath, p);
     let added = 0;
     try {
-      const stat = await fs.promises.stat(fullPath);
+      const stat = await fs.promises.stat(fsPath(fullPath));
       if (stat.isFile() && stat.size < MAX_BUFFER) {
-        const content = await fs.promises.readFile(fullPath, 'utf8');
+        const content = await fs.promises.readFile(fsPath(fullPath), 'utf8');
         added = content.split('\n').length;
       }
     } catch {
@@ -468,7 +613,7 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
 
   let diff = '';
   try {
-    const { stdout } = await exec('git', ['diff', base, '--', filePath], {
+    const { stdout } = await gitExec(['diff', base, '--', filePath], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -493,13 +638,13 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
   let newContent = '';
   let fileExistsOnDisk = false;
   let fileContentReadable = false;
-  const fullPath = path.join(worktreePath, filePath);
+  const fullPath = pjoin(worktreePath, filePath);
   try {
-    const stat = await fs.promises.stat(fullPath);
+    const stat = await fs.promises.stat(fsPath(fullPath));
     if (stat.isFile()) {
       fileExistsOnDisk = true;
       if (stat.size < MAX_BUFFER) {
-        newContent = await fs.promises.readFile(fullPath, 'utf8');
+        newContent = await fs.promises.readFile(fsPath(fullPath), 'utf8');
         fileContentReadable = true;
       }
     }
@@ -524,21 +669,35 @@ export async function getFileDiff(worktreePath: string, filePath: string): Promi
 export async function getWorktreeStatus(
   worktreePath: string,
 ): Promise<{ has_committed_changes: boolean; has_uncommitted_changes: boolean }> {
-  const { stdout: statusOut } = await exec('git', ['status', '--porcelain'], {
-    cwd: worktreePath,
-    maxBuffer: MAX_BUFFER,
-  });
-  const hasUncommittedChanges = statusOut.trim().length > 0;
+  let hasUncommittedChanges = false;
+  try {
+    const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
+      cwd: worktreePath,
+      maxBuffer: MAX_BUFFER,
+    });
+    hasUncommittedChanges = statusOut.trim().length > 0;
+  } catch (e) {
+    console.error('[getWorktreeStatus] git status failed:', e);
+  }
 
   const mainBranch = await detectMainBranch(worktreePath).catch(() => 'HEAD');
   let hasCommittedChanges = false;
   try {
-    const { stdout: logOut } = await exec('git', ['log', `${mainBranch}..HEAD`, '--oneline'], {
+    const { stdout: logOut } = await gitExec(['log', `${mainBranch}..HEAD`, '--oneline'], {
       cwd: worktreePath,
     });
     hasCommittedChanges = logOut.trim().length > 0;
   } catch {
-    /* ignore */
+    // mainBranch ref may not exist yet (fresh repo with no commits on main/master).
+    // Fall back: if HEAD has any commits at all, there is something to merge.
+    try {
+      const { stdout: countOut } = await gitExec(['rev-list', '--count', 'HEAD'], {
+        cwd: worktreePath,
+      });
+      hasCommittedChanges = parseInt(countOut.trim(), 10) > 0;
+    } catch (e) {
+      console.error('[getWorktreeStatus] git rev-list fallback failed:', e);
+    }
   }
 
   return {
@@ -566,7 +725,7 @@ export async function checkMergeStatus(
 
   let mainAheadCount = 0;
   try {
-    const { stdout } = await exec('git', ['rev-list', '--count', `HEAD..${mainBranch}`], {
+    const { stdout } = await gitExec(['rev-list', '--count', `HEAD..${mainBranch}`], {
       cwd: worktreePath,
     });
     mainAheadCount = parseInt(stdout.trim(), 10) || 0;
@@ -578,7 +737,7 @@ export async function checkMergeStatus(
 
   const conflictingFiles: string[] = [];
   try {
-    await exec('git', ['merge-tree', '--write-tree', 'HEAD', mainBranch], { cwd: worktreePath });
+    await gitExec(['merge-tree', '--write-tree', 'HEAD', mainBranch], { cwd: worktreePath });
   } catch (e: unknown) {
     // merge-tree outputs conflict info on failure
     const output = String(e);
@@ -602,14 +761,15 @@ export async function mergeTask(
 
   return withWorktreeLock(lockKey, async () => {
     const mainBranch = await detectMainBranch(projectRoot);
+    // Diff stats are cosmetic — don't let a failure here block the merge.
     const { linesAdded, linesRemoved } = await computeBranchDiffStats(
       projectRoot,
       mainBranch,
       branchName,
-    );
+    ).catch(() => ({ linesAdded: 0, linesRemoved: 0 }));
 
     // Verify clean working tree
-    const { stdout: statusOut } = await exec('git', ['status', '--porcelain'], {
+    const { stdout: statusOut } = await gitExec(['status', '--porcelain'], {
       cwd: projectRoot,
     });
     if (statusOut.trim())
@@ -620,12 +780,12 @@ export async function mergeTask(
     const originalBranch = await getCurrentBranchName(projectRoot).catch(() => null);
 
     // Checkout main
-    await exec('git', ['checkout', mainBranch], { cwd: projectRoot });
+    await gitExec(['checkout', mainBranch], { cwd: projectRoot });
 
     const restoreBranch = async () => {
       if (originalBranch) {
         try {
-          await exec('git', ['checkout', originalBranch], { cwd: projectRoot });
+          await gitExec(['checkout', originalBranch], { cwd: projectRoot });
         } catch {
           /* ignore */
         }
@@ -634,25 +794,25 @@ export async function mergeTask(
 
     if (squash) {
       try {
-        await exec('git', ['merge', '--squash', '--', branchName], { cwd: projectRoot });
+        await gitExec(['merge', '--squash', '--', branchName], { cwd: projectRoot });
       } catch (e) {
-        await exec('git', ['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
+        await gitExec(['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
         await restoreBranch();
         throw new Error(`Squash merge failed: ${e}`);
       }
       const msg = message ?? 'Squash merge';
       try {
-        await exec('git', ['commit', '-m', msg], { cwd: projectRoot });
+        await gitExec(['commit', '-m', msg], { cwd: projectRoot });
       } catch (e) {
-        await exec('git', ['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
+        await gitExec(['reset', '--hard', 'HEAD'], { cwd: projectRoot }).catch(() => {});
         await restoreBranch();
         throw new Error(`Commit failed: ${e}`);
       }
     } else {
       try {
-        await exec('git', ['merge', '--', branchName], { cwd: projectRoot });
+        await gitExec(['merge', '--', branchName], { cwd: projectRoot });
       } catch (e) {
-        await exec('git', ['merge', '--abort'], { cwd: projectRoot }).catch(() => {});
+        await gitExec(['merge', '--abort'], { cwd: projectRoot }).catch(() => {});
         await restoreBranch();
         throw new Error(`Merge failed: ${e}`);
       }
@@ -673,7 +833,7 @@ export async function mergeTask(
 export async function getBranchLog(worktreePath: string): Promise<string> {
   const mainBranch = await detectMainBranch(worktreePath).catch(() => 'HEAD');
   try {
-    const { stdout } = await exec('git', ['log', `${mainBranch}..HEAD`, '--pretty=format:- %s'], {
+    const { stdout } = await gitExec(['log', `${mainBranch}..HEAD`, '--pretty=format:- %s'], {
       cwd: worktreePath,
       maxBuffer: MAX_BUFFER,
     });
@@ -790,7 +950,7 @@ export async function getFileDiffFromBranch(
 }
 
 export async function pushTask(projectRoot: string, branchName: string): Promise<void> {
-  await exec('git', ['push', '-u', 'origin', '--', branchName], { cwd: projectRoot });
+  await gitExec(['push', '-u', 'origin', '--', branchName], { cwd: projectRoot });
 }
 
 export async function rebaseTask(worktreePath: string): Promise<void> {
@@ -799,9 +959,9 @@ export async function rebaseTask(worktreePath: string): Promise<void> {
   return withWorktreeLock(lockKey, async () => {
     const mainBranch = await detectMainBranch(worktreePath);
     try {
-      await exec('git', ['rebase', mainBranch], { cwd: worktreePath });
+      await gitExec(['rebase', mainBranch], { cwd: worktreePath });
     } catch (e) {
-      await exec('git', ['rebase', '--abort'], { cwd: worktreePath }).catch(() => {});
+      await gitExec(['rebase', '--abort'], { cwd: worktreePath }).catch(() => {});
       throw new Error(`Rebase failed: ${e}`);
     }
     invalidateMergeBaseCache();

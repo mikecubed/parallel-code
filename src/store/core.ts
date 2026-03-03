@@ -15,6 +15,7 @@ export const [store, setStore] = createStore<AppStore>({
   activeTaskId: null,
   activeAgentId: null,
   availableAgents: [],
+  availableShells: [],
   customAgents: [],
   showNewTaskDialog: false,
   sidebarVisible: true,

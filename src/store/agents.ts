@@ -3,6 +3,7 @@ import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import { store, setStore } from './core';
 import type { AgentDef } from '../ipc/types';
+import type { ShellOption } from '../ipc/types';
 import type { Agent } from './types';
 import { refreshTaskStatus, clearAgentActivity, markAgentSpawned } from './taskStatus';
 
@@ -11,6 +12,11 @@ export async function loadAgents(): Promise<void> {
   const custom = store.customAgents;
   const customIds = new Set(custom.map((a) => a.id));
   setStore('availableAgents', [...defaults.filter((d) => !customIds.has(d.id)), ...custom]);
+}
+
+export async function loadShells(): Promise<void> {
+  const shells = await invoke<ShellOption[]>(IPC.GetAvailableShells);
+  setStore('availableShells', shells);
 }
 
 export async function addAgentToTask(taskId: string, agentDef: AgentDef): Promise<void> {

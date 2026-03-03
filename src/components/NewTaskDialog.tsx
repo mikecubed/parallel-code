@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, onCleanup } from 'solid-js';
+import { createSignal, createEffect, For, Show, onCleanup } from 'solid-js';
 import { Dialog } from './Dialog';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
@@ -25,6 +25,7 @@ import { BranchPrefixField } from './BranchPrefixField';
 import { ProjectSelect } from './ProjectSelect';
 import { SymlinkDirPicker } from './SymlinkDirPicker';
 import type { AgentDef } from '../ipc/types';
+import type { ShellType } from '../store/store';
 
 interface NewTaskDialogProps {
   open: boolean;
@@ -43,6 +44,7 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
   const [directMode, setDirectMode] = createSignal(false);
   const [skipPermissions, setSkipPermissions] = createSignal(false);
   const [branchPrefix, setBranchPrefix] = createSignal('');
+  const [selectedShellType, setSelectedShellType] = createSignal<ShellType | undefined>(undefined);
   let promptRef!: HTMLTextAreaElement;
   let formRef!: HTMLFormElement;
 
@@ -296,6 +298,7 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
           initialPrompt: isFromDrop ? undefined : p,
           githubUrl: ghUrl,
           skipPermissions: agentSupportsSkipPermissions() && skipPermissions(),
+          shellType: selectedShellType(),
         });
       } else {
         taskId = await createTask({
@@ -307,6 +310,7 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
           branchPrefixOverride: prefix,
           githubUrl: ghUrl,
           skipPermissions: agentSupportsSkipPermissions() && skipPermissions(),
+          shellType: selectedShellType(),
         });
       }
       // Drop flow: prefill prompt without auto-sending
@@ -500,6 +504,61 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
           selectedAgent={selectedAgent()}
           onSelect={setSelectedAgent}
         />
+
+        {/* Shell selector — only shown on Windows with multiple shells available */}
+        <Show when={store.availableShells.length > 1}>
+          <div
+            data-nav-field="shell-type"
+            style={{ display: 'flex', 'flex-direction': 'column', gap: '8px' }}
+          >
+            <label
+              style={{
+                'font-size': '11px',
+                color: theme.fgMuted,
+                'text-transform': 'uppercase',
+                'letter-spacing': '0.05em',
+              }}
+            >
+              Shell
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <For each={store.availableShells}>
+                {(shell) => {
+                  const isSelected = () =>
+                    selectedShellType() === shell.id ||
+                    (selectedShellType() === undefined &&
+                      store.availableShells[0]?.id === shell.id);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedShellType(shell.id)}
+                      style={{
+                        flex: '1',
+                        padding: '10px 8px',
+                        background: isSelected() ? theme.bgSelected : theme.bgInput,
+                        border: isSelected()
+                          ? `1px solid ${theme.accent}`
+                          : `1px solid ${theme.border}`,
+                        'border-radius': '8px',
+                        color: isSelected()
+                          ? store.themePreset === 'graphite' || store.themePreset === 'minimal'
+                            ? '#ffffff'
+                            : theme.accentText
+                          : theme.fg,
+                        cursor: 'pointer',
+                        'font-size': '12px',
+                        'font-weight': isSelected() ? '500' : '400',
+                        'text-align': 'center',
+                      }}
+                    >
+                      {shell.label}
+                    </button>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+        </Show>
 
         {/* Direct mode toggle */}
         <div
