@@ -60,7 +60,7 @@ function getNetworkIps(): { wifi: string | null; tailscale: string | null } {
   return { wifi, tailscale };
 }
 
-/** Build the agent list, deduplicated by taskId (keeps latest agent per task). */
+/** Build the agent list, deduplicated by taskId (keeps main agent per task). */
 function buildAgentList(
   getTaskName: (taskId: string) => string,
   getAgentStatus: (agentId: string) => {
@@ -73,6 +73,8 @@ function buildAgentList(
   for (const agentId of getActiveAgentIds()) {
     const meta = getAgentMeta(agentId);
     if (!meta) continue;
+    // Skip shell/sub-terminals — mobile should only show the main agent
+    if (meta.isShell) continue;
     const info = getAgentStatus(agentId);
     const agent: RemoteAgent = {
       agentId,
@@ -220,20 +222,19 @@ export function startRemoteServer(opts: {
         cb(false, 429, 'Too many connections');
         return;
       }
-      if (!checkAuth(info.req)) {
-        cb(false, 401, 'Unauthorized');
-        return;
-      }
+      // Also accept token in URL query for backward compatibility, but
+      // the preferred flow is first-message auth (avoids token in URL).
       cb(true);
     },
   });
 
   const clientSubs = new WeakMap<WebSocket, Map<string, (data: string) => void>>();
+  const authenticatedClients = new WeakSet<WebSocket>();
 
   function broadcast(msg: ServerMessage): void {
     const json = JSON.stringify(msg);
     for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
+      if (client.readyState === WebSocket.OPEN && authenticatedClients.has(client)) {
         client.send(json);
       }
     }
@@ -262,15 +263,37 @@ export function startRemoteServer(opts: {
     }, 100);
   });
 
-  wss.on('connection', (ws) => {
-    const list = buildAgentList(opts.getTaskName, opts.getAgentStatus);
-    ws.send(JSON.stringify({ type: 'agents', list } satisfies ServerMessage));
-
+  wss.on('connection', (ws, req) => {
     clientSubs.set(ws, new Map());
+
+    // Support legacy URL-based auth (verifyClient accepted all connections)
+    if (checkAuth(req)) {
+      authenticatedClients.add(ws);
+      const list = buildAgentList(opts.getTaskName, opts.getAgentStatus);
+      ws.send(JSON.stringify({ type: 'agents', list } satisfies ServerMessage));
+    }
 
     ws.on('message', (raw) => {
       const msg = parseClientMessage(String(raw));
       if (!msg) return;
+
+      // Handle first-message auth
+      if (msg.type === 'auth') {
+        if (safeCompare(msg.token)) {
+          authenticatedClients.add(ws);
+          const list = buildAgentList(opts.getTaskName, opts.getAgentStatus);
+          ws.send(JSON.stringify({ type: 'agents', list } satisfies ServerMessage));
+        } else {
+          ws.close(4001, 'Unauthorized');
+        }
+        return;
+      }
+
+      // Reject messages from unauthenticated clients
+      if (!authenticatedClients.has(ws)) {
+        ws.close(4001, 'Unauthorized');
+        return;
+      }
 
       switch (msg.type) {
         case 'input':
@@ -359,15 +382,20 @@ export function startRemoteServer(opts: {
 
   const primaryIp = ips.wifi ?? ips.tailscale ?? '127.0.0.1';
   const url = `http://${primaryIp}:${opts.port}?token=${token}`;
-  const wifiUrl = ips.wifi ? `http://${ips.wifi}:${opts.port}?token=${token}` : null;
-  const tailscaleUrl = ips.tailscale ? `http://${ips.tailscale}:${opts.port}?token=${token}` : null;
 
   return {
     token,
     port: opts.port,
     url,
-    wifiUrl,
-    tailscaleUrl,
+    /** Re-detect network IPs so newly connected interfaces (e.g. Tailscale) are picked up. */
+    get wifiUrl() {
+      const cur = getNetworkIps();
+      return cur.wifi ? `http://${cur.wifi}:${opts.port}?token=${token}` : null;
+    },
+    get tailscaleUrl() {
+      const cur = getNetworkIps();
+      return cur.tailscale ? `http://${cur.tailscale}:${opts.port}?token=${token}` : null;
+    },
     connectedClients: () => wss.clients.size,
     stop: () =>
       new Promise<void>((resolve) => {

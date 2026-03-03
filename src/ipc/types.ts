@@ -20,6 +20,7 @@ export interface AgentDef {
   resume_args?: string[];
   skip_permissions_args?: string[];
   description: string;
+  available?: boolean;
 }
 
 export interface CreateTaskResult {
@@ -60,4 +61,10 @@ export interface MergeResult {
   main_branch: string;
   lines_added: number;
   lines_removed: number;
+}
+
+export interface FileDiffResult {
+  diff: string;
+  oldContent: string;
+  newContent: string;
 }

@@ -87,6 +87,14 @@ export function setInactiveColumnOpacity(opacity: number): void {
   setStore('inactiveColumnOpacity', Math.round(Math.max(0.3, Math.min(1.0, opacity)) * 100) / 100);
 }
 
+export function setEditorCommand(command: string): void {
+  setStore('editorCommand', command);
+}
+
+export function toggleArena(show?: boolean): void {
+  setStore('showArena', show ?? !store.showArena);
+}
+
 export function setWindowState(windowState: PersistedWindowState): void {
   const current = store.windowState;
   if (

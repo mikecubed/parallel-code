@@ -1,4 +1,6 @@
 import * as pty from 'node-pty';
+import { execFileSync } from 'child_process';
+import fs from 'fs';
 import type { BrowserWindow } from 'electron';
 import { RingBuffer } from '../remote/ring-buffer.js';
 import { toWslPath, toWinPath } from '../lib/wsl.js';
@@ -8,6 +10,7 @@ interface PtySession {
   channelId: string;
   taskId: string;
   agentId: string;
+  isShell: boolean;
   flushTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<(encoded: string) => void>;
   scrollback: RingBuffer;
@@ -23,8 +26,12 @@ const eventListeners = new Map<PtyEventType, Set<PtyEventListener>>();
 
 /** Register a listener for PTY lifecycle events. Returns an unsubscribe function. */
 export function onPtyEvent(event: PtyEventType, listener: PtyEventListener): () => void {
-  if (!eventListeners.has(event)) eventListeners.set(event, new Set());
-  eventListeners.get(event)!.add(listener);
+  let listeners = eventListeners.get(event);
+  if (!listeners) {
+    listeners = new Set();
+    eventListeners.set(event, listeners);
+  }
+  listeners.add(listener);
   return () => {
     eventListeners.get(event)?.delete(listener);
   };
@@ -44,6 +51,32 @@ const BATCH_INTERVAL = 8; // ms
 const TAIL_CAP = 8 * 1024;
 const MAX_LINES = 50;
 
+/** Verify that a command exists in PATH. Throws a descriptive error if not found. */
+export function validateCommand(command: string): void {
+  if (!command || !command.trim()) {
+    throw new Error('Command must not be empty.');
+  }
+  // Absolute paths: check directly via filesystem
+  if (command.startsWith('/')) {
+    try {
+      fs.accessSync(command, fs.constants.X_OK);
+      return;
+    } catch {
+      throw new Error(
+        `Command '${command}' not found or not executable. Check that it is installed.`,
+      );
+    }
+  }
+  // Bare names: resolve via `which` (execFileSync — no shell interpolation)
+  try {
+    execFileSync('which', [command], { encoding: 'utf8', timeout: 3000 });
+  } catch {
+    throw new Error(
+      `Command '${command}' not found in PATH. Make sure it is installed and available in your terminal.`,
+    );
+  }
+}
+
 export function spawnAgent(
   win: BrowserWindow,
   args: {
@@ -56,6 +89,7 @@ export function spawnAgent(
     cols: number;
     rows: number;
     shellType?: 'wsl2' | 'pwsh' | 'powershell';
+    isShell?: boolean;
     onOutput: { __CHANNEL_ID__: string };
   },
 ): void {
@@ -128,6 +162,8 @@ export function spawnAgent(
     throw new Error(`Command contains disallowed characters: ${command}`);
   }
 
+  validateCommand(command);
+
   const filteredEnv: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) filteredEnv[k] = v;
@@ -182,6 +218,7 @@ export function spawnAgent(
     channelId,
     taskId: args.taskId,
     agentId: args.agentId,
+    isShell: args.isShell ?? false,
     flushTimer: null,
     subscribers: new Set(),
     scrollback: new RingBuffer(),
@@ -351,9 +388,11 @@ export function getActiveAgentIds(): string[] {
 }
 
 /** Return metadata for a specific agent, or null if not found. */
-export function getAgentMeta(agentId: string): { taskId: string; agentId: string } | null {
+export function getAgentMeta(
+  agentId: string,
+): { taskId: string; agentId: string; isShell: boolean } | null {
   const s = sessions.get(agentId);
-  return s ? { taskId: s.taskId, agentId: s.agentId } : null;
+  return s ? { taskId: s.taskId, agentId: s.agentId, isShell: s.isShell } : null;
 }
 
 /** Return the current column width of an agent's PTY. */

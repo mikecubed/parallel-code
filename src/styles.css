@@ -110,18 +110,18 @@ body {
 html[data-look='classic'] {
   --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --bg: #000000;
-  --bg-elevated: #1a1b1d;
-  --bg-input: #1a1b1d;
-  --bg-hover: #252629;
-  --bg-selected: #2a3a6e;
-  --bg-selected-subtle: #2a3a6e33;
-  --border: #222426;
-  --border-subtle: #1a1b1d;
+  --bg: #0c0c0d;
+  --bg-elevated: #222326;
+  --bg-input: #222326;
+  --bg-hover: #2e3033;
+  --bg-selected: #344580;
+  --bg-selected-subtle: #34458033;
+  --border: #2c2e31;
+  --border-subtle: #222326;
   --border-focus: #4c6fff;
-  --fg: #bcbec4;
-  --fg-muted: #787a80;
-  --fg-subtle: #5a5d63;
+  --fg: #cccdd2;
+  --fg-muted: #8b8d93;
+  --fg-subtle: #6d7076;
   --accent: #4c6fff;
   --accent-hover: #3a5bff;
   --accent-text: #ffffff;
@@ -129,11 +129,11 @@ html[data-look='classic'] {
   --success: #0dbc79;
   --error: #f75464;
   --warning: #f2c55c;
-  --island-bg: #111213;
-  --island-border: #222426;
+  --island-bg: #19191c;
+  --island-border: #2c2e31;
   --island-radius: 10px;
-  --task-container-bg: #111213;
-  --task-panel-bg: #1a1b1d;
+  --task-container-bg: #19191c;
+  --task-panel-bg: #222326;
   --shadow-soft: 0 0 0 rgba(0, 0, 0, 0);
   --shadow-pop: 0 0 8px rgba(99, 102, 241, 0.5);
 }
@@ -224,18 +224,18 @@ html[data-look='ember'] {
 }
 
 html[data-look='glacier'] {
-  --bg: radial-gradient(140% 120% at 0% 0%, #1a2730 0%, #0f171e 52%, #090f14 100%);
-  --bg-elevated: #151e26;
-  --bg-input: #121a22;
-  --bg-hover: #20303d;
-  --bg-selected: #193f47;
-  --bg-selected-subtle: #193f4740;
-  --border: #2a404e;
-  --border-subtle: #1f303b;
+  --bg: radial-gradient(140% 120% at 0% 0%, #223340 0%, #17212b 52%, #111920 100%);
+  --bg-elevated: #1d2833;
+  --bg-input: #1a232d;
+  --bg-hover: #293b4a;
+  --bg-selected: #224c55;
+  --bg-selected-subtle: #224c5540;
+  --border: #344c5c;
+  --border-subtle: #283b48;
   --border-focus: #50e2d3;
-  --fg: #dce9f0;
-  --fg-muted: #abc2cd;
-  --fg-subtle: #7d9aa8;
+  --fg: #e5eff5;
+  --fg-muted: #bed2dc;
+  --fg-subtle: #92aebb;
   --accent: #50e2d3;
   --accent-hover: #76ece0;
   --accent-text: #041413;
@@ -243,10 +243,10 @@ html[data-look='glacier'] {
   --success: #4ed59f;
   --error: #ff6f88;
   --warning: #ffd57d;
-  --island-bg: #131b23;
-  --island-border: #2a404e;
-  --task-container-bg: #0e151c;
-  --task-panel-bg: #151e26;
+  --island-bg: #1b242e;
+  --island-border: #344c5c;
+  --task-container-bg: #162028;
+  --task-panel-bg: #1d2833;
 }
 
 html[data-look='minimal'] {
@@ -397,7 +397,8 @@ textarea::placeholder {
 
 .input-field:focus,
 .prompt-textarea:focus,
-.new-task-project-trigger:focus-visible,
+.project-select:focus-visible,
+.project-select:focus,
 .agent-btn:focus-visible,
 .btn-primary:focus-visible,
 .btn-secondary:focus-visible {
@@ -408,21 +409,84 @@ textarea::placeholder {
   outline: none;
 }
 
-.new-task-project-trigger {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent !important;
-  background-color: transparent !important;
-  color: var(--fg) !important;
+.project-select,
+.project-select::picker(select) {
+  appearance: base-select;
 }
 
-.new-task-project-option {
-  background: transparent !important;
-  color: var(--fg) !important;
+.project-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  outline: none;
 }
 
-.new-task-project-option:hover {
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover)) !important;
+.project-select::picker-icon {
+  color: var(--fg-muted);
+  transition: rotate 0.14s ease;
+}
+
+.project-select:open::picker-icon {
+  rotate: 180deg;
+}
+
+.project-select::picker(select) {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+}
+
+.project-select option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--fg);
+  background: transparent;
+}
+
+.project-select option:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
+}
+
+.project-select option:checked {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.project-select option::checkmark {
+  display: none;
+}
+
+.project-select button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.project-color-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .agent-btn:hover {
@@ -719,28 +783,6 @@ body.dragging-task * {
   font-weight: 600;
   color: var(--fg);
   letter-spacing: 0.01em;
-}
-
-.diff-tailwindcss-wrapper[data-theme='dark'] .diff-style-root {
-  --diff-border--: var(--border);
-  --diff-add-content--: rgba(47, 209, 152, 0.09);
-  --diff-del-content--: rgba(255, 95, 115, 0.09);
-  --diff-add-lineNumber--: rgba(47, 209, 152, 0.13);
-  --diff-del-lineNumber--: rgba(255, 95, 115, 0.13);
-  --diff-add-content-highlight--: rgba(47, 209, 152, 0.24);
-  --diff-del-content-highlight--: rgba(255, 95, 115, 0.24);
-  --diff-plain-content--: var(--island-bg);
-  --diff-expand-content--: var(--bg-elevated);
-  --diff-plain-lineNumber--: var(--bg-elevated);
-  --diff-expand-lineNumber--: var(--bg-elevated);
-  --diff-plain-lineNumber-color--: var(--fg-subtle);
-  --diff-expand-lineNumber-color--: var(--fg-subtle);
-  --diff-hunk-content--: color-mix(in srgb, var(--accent) 10%, transparent);
-  --diff-hunk-lineNumber--: color-mix(in srgb, var(--accent) 15%, transparent);
-  --diff-hunk-lineNumber-hover--: var(--accent);
-  --diff-hunk-content-color--: var(--fg-muted);
-  --diff-empty-content--: var(--bg-elevated);
-  font-family: var(--font-mono);
 }
 
 .shell-terminal-close {
@@ -1044,4 +1086,36 @@ body.dragging-task * {
   width: 8px;
   height: 8px;
   cursor: nesw-resize;
+}
+
+/* Monaco diff: hidden unchanged regions — make the collapse bar obvious and clickable */
+.monaco-editor .diff-hidden-lines .center {
+  cursor: pointer;
+  height: 28px;
+  line-height: 28px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  border-radius: 4px;
+  transition: filter 0.15s ease;
+}
+
+.monaco-editor .diff-hidden-lines .center:hover {
+  filter: brightness(1.3);
+}
+
+/* Let the label text also be single-clickable (Monaco defaults to dblclick) */
+.monaco-editor .diff-hidden-lines .center span {
+  pointer-events: none;
+}
+
+/* Hide the unfold icon — the whole bar is clickable now */
+.monaco-editor .diff-hidden-lines .center > div:first-child {
+  width: 0 !important;
+  overflow: hidden;
+}
+
+/* Hide the tiny drag handles — the center bar handles expansion */
+.monaco-editor .diff-hidden-lines .top,
+.monaco-editor .diff-hidden-lines .bottom {
+  display: none;
 }

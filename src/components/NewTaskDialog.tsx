@@ -8,8 +8,8 @@ import {
   createDirectTask,
   toggleNewTaskDialog,
   loadAgents,
-  getProjectPath,
   getProject,
+  getProjectPath,
   getProjectBranchPrefix,
   updateProject,
   hasDirectModeTask,
@@ -20,6 +20,10 @@ import { toBranchName, sanitizeBranchPrefix } from '../lib/branch-name';
 import { cleanTaskName } from '../lib/clean-task-name';
 import { extractGitHubUrl } from '../lib/github-url';
 import { theme } from '../lib/theme';
+import { AgentSelector } from './AgentSelector';
+import { BranchPrefixField } from './BranchPrefixField';
+import { ProjectSelect } from './ProjectSelect';
+import { SymlinkDirPicker } from './SymlinkDirPicker';
 import type { AgentDef } from '../ipc/types';
 import type { ShellType } from '../store/store';
 
@@ -33,8 +37,6 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
   const [name, setName] = createSignal('');
   const [selectedAgent, setSelectedAgent] = createSignal<AgentDef | null>(null);
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
-  const [projectMenuOpen, setProjectMenuOpen] = createSignal(false);
-  const [highlightedProjectIndex, setHighlightedProjectIndex] = createSignal(-1);
   const [error, setError] = createSignal('');
   const [loading, setLoading] = createSignal(false);
   const [ignoredDirs, setIgnoredDirs] = createSignal<string[]>([]);
@@ -43,78 +45,11 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
   const [skipPermissions, setSkipPermissions] = createSignal(false);
   const [branchPrefix, setBranchPrefix] = createSignal('');
   const [selectedShellType, setSelectedShellType] = createSignal<ShellType | undefined>(undefined);
-  let projectMenuRef!: HTMLDivElement;
   let promptRef!: HTMLTextAreaElement;
   let formRef!: HTMLFormElement;
 
-  const handleProjectMenuKeyDown = (e: KeyboardEvent) => {
-    const projects = store.projects;
-    if (!projects.length) return;
-
-    if (!projectMenuOpen()) {
-      // Open on ArrowDown/ArrowUp/Enter/Space
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        const currentIdx = projects.findIndex((p) => p.id === selectedProjectId());
-        setHighlightedProjectIndex(currentIdx >= 0 ? currentIdx : 0);
-        setProjectMenuOpen(true);
-      }
-      return;
-    }
-
-    switch (e.key) {
-      case 'ArrowDown': {
-        e.preventDefault();
-        setHighlightedProjectIndex((i) => (i < projects.length - 1 ? i + 1 : 0));
-        scrollHighlightedIntoView();
-        break;
-      }
-      case 'ArrowUp': {
-        e.preventDefault();
-        setHighlightedProjectIndex((i) => (i > 0 ? i - 1 : projects.length - 1));
-        scrollHighlightedIntoView();
-        break;
-      }
-      case 'Enter':
-      case ' ': {
-        e.preventDefault();
-        const idx = highlightedProjectIndex();
-        if (idx >= 0 && idx < projects.length) {
-          setSelectedProjectId(projects[idx].id);
-        }
-        setProjectMenuOpen(false);
-        break;
-      }
-      case 'Escape': {
-        e.preventDefault();
-        setProjectMenuOpen(false);
-        break;
-      }
-      case 'Home': {
-        e.preventDefault();
-        setHighlightedProjectIndex(0);
-        scrollHighlightedIntoView();
-        break;
-      }
-      case 'End': {
-        e.preventDefault();
-        setHighlightedProjectIndex(projects.length - 1);
-        scrollHighlightedIntoView();
-        break;
-      }
-    }
-  };
-
-  function scrollHighlightedIntoView() {
-    requestAnimationFrame(() => {
-      projectMenuRef
-        ?.querySelector('.new-task-project-option.highlighted')
-        ?.scrollIntoView({ block: 'nearest' });
-    });
-  }
-
   const focusableSelector =
-    'textarea:not(:disabled), input:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])';
+    'textarea:not(:disabled), input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
   function navigateDialogFields(direction: 'up' | 'down'): void {
     if (!formRef) return;
@@ -170,7 +105,6 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
     setName('');
     setError('');
     setLoading(false);
-    setProjectMenuOpen(false);
     setDirectMode(false);
     setSkipPermissions(false);
 
@@ -192,16 +126,16 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
       if (defaults) setName(defaults.name);
       setSelectedProjectId(defaults?.projectId ?? fallbackProjectId);
 
+      // Pre-fill from arena comparison prompt
+      const prefill = store.newTaskPrefillPrompt;
+      if (prefill) {
+        setPrompt(prefill.prompt);
+        setName('Compare arena results');
+        if (prefill.projectId) setSelectedProjectId(prefill.projectId);
+      }
+
       promptRef?.focus();
     })();
-
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      if (!projectMenuRef) return;
-      if (!projectMenuRef.contains(event.target as Node)) {
-        setProjectMenuOpen(false);
-      }
-    };
-    window.addEventListener('pointerdown', handleOutsidePointerDown);
 
     // Capture-phase handler for Alt+Arrow to navigate form sections / within fields
     const handleAltArrow = (e: KeyboardEvent) => {
@@ -222,7 +156,6 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
     window.addEventListener('keydown', handleAltArrow, true);
 
     onCleanup(() => {
-      window.removeEventListener('pointerdown', handleOutsidePointerDown);
       window.removeEventListener('keydown', handleAltArrow, true);
     });
   });
@@ -263,6 +196,14 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
     setBranchPrefix(pid ? getProjectBranchPrefix(pid) : 'task');
   });
 
+  // Pre-check direct mode based on project setting
+  createEffect(() => {
+    const pid = selectedProjectId();
+    if (!pid) return;
+    const proj = getProject(pid);
+    setDirectMode(proj?.defaultDirectMode ?? false);
+  });
+
   createEffect(() => {
     if (directModeDisabled()) setDirectMode(false);
   });
@@ -287,11 +228,6 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
   const selectedProjectPath = () => {
     const pid = selectedProjectId();
     return pid ? getProjectPath(pid) : undefined;
-  };
-
-  const selectedProject = () => {
-    const pid = selectedProjectId();
-    return pid ? getProject(pid) : undefined;
   };
 
   const directModeDisabled = () => {
@@ -354,28 +290,28 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
           );
           return;
         }
-        taskId = await createDirectTask(
-          n,
-          agent,
+        taskId = await createDirectTask({
+          name: n,
+          agentDef: agent,
           projectId,
           mainBranch,
-          isFromDrop ? undefined : p,
-          ghUrl,
-          agentSupportsSkipPermissions() && skipPermissions(),
-          selectedShellType(),
-        );
+          initialPrompt: isFromDrop ? undefined : p,
+          githubUrl: ghUrl,
+          skipPermissions: agentSupportsSkipPermissions() && skipPermissions(),
+          shellType: selectedShellType(),
+        });
       } else {
-        taskId = await createTask(
-          n,
-          agent,
+        taskId = await createTask({
+          name: n,
+          agentDef: agent,
           projectId,
-          [...selectedDirs()],
-          isFromDrop ? undefined : p,
-          prefix,
-          ghUrl,
-          agentSupportsSkipPermissions() && skipPermissions(),
-          selectedShellType(),
-        );
+          symlinkDirs: [...selectedDirs()],
+          initialPrompt: isFromDrop ? undefined : p,
+          branchPrefixOverride: prefix,
+          githubUrl: ghUrl,
+          skipPermissions: agentSupportsSkipPermissions() && skipPermissions(),
+          shellType: selectedShellType(),
+        });
       }
       // Drop flow: prefill prompt without auto-sending
       if (isFromDrop && p) {
@@ -418,6 +354,24 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
               ? 'The AI agent will work directly on your main branch in the project root.'
               : 'Creates a git branch and worktree so the AI agent can work in isolation without affecting your main branch.'}
           </p>
+        </div>
+
+        {/* Project selector */}
+        <div
+          data-nav-field="project"
+          style={{ display: 'flex', 'flex-direction': 'column', gap: '8px' }}
+        >
+          <label
+            style={{
+              'font-size': '11px',
+              color: theme.fgMuted,
+              'text-transform': 'uppercase',
+              'letter-spacing': '0.05em',
+            }}
+          >
+            Project
+          </label>
+          <ProjectSelect value={selectedProjectId()} onChange={setSelectedProjectId} />
         </div>
 
         {/* Prompt input (optional) */}
@@ -537,308 +491,19 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
         </div>
 
         <Show when={!directMode()}>
-          <div
-            data-nav-field="branch-prefix"
-            style={{ display: 'flex', 'flex-direction': 'column', gap: '8px' }}
-          >
-            <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
-              <label
-                style={{ 'font-size': '11px', color: theme.fgSubtle, 'white-space': 'nowrap' }}
-              >
-                Branch prefix
-              </label>
-              <input
-                class="input-field"
-                type="text"
-                value={branchPrefix()}
-                onInput={(e) => setBranchPrefix(e.currentTarget.value)}
-                placeholder="task"
-                style={{
-                  background: theme.bgInput,
-                  border: `1px solid ${theme.border}`,
-                  'border-radius': '6px',
-                  padding: '4px 8px',
-                  color: theme.fg,
-                  'font-size': '12px',
-                  'font-family': "'JetBrains Mono', monospace",
-                  outline: 'none',
-                  width: '120px',
-                }}
-              />
-            </div>
-            <Show when={branchPreview() && selectedProjectPath()}>
-              <div
-                style={{
-                  'font-size': '11px',
-                  'font-family': "'JetBrains Mono', monospace",
-                  color: theme.fgSubtle,
-                  display: 'flex',
-                  'flex-direction': 'column',
-                  gap: '2px',
-                  padding: '4px 2px 0',
-                }}
-              >
-                <span style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    style={{ 'flex-shrink': '0' }}
-                  >
-                    <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm6.25 7.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 7.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm0 0h5.5a2.5 2.5 0 0 0 2.5-2.5v-.5a.75.75 0 0 0-1.5 0v.5a1 1 0 0 1-1 1H5a3.25 3.25 0 1 0 0 6.5h6.25a.75.75 0 0 0 0-1.5H5a1.75 1.75 0 1 1 0-3.5Z" />
-                  </svg>
-                  {branchPreview()}
-                </span>
-                <span style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    style={{ 'flex-shrink': '0' }}
-                  >
-                    <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z" />
-                  </svg>
-                  {selectedProjectPath()}/.worktrees/{branchPreview()}
-                </span>
-              </div>
-            </Show>
-          </div>
+          <BranchPrefixField
+            branchPrefix={branchPrefix()}
+            branchPreview={branchPreview()}
+            projectPath={selectedProjectPath()}
+            onPrefixChange={setBranchPrefix}
+          />
         </Show>
 
-        {/* Project selector */}
-        <div
-          data-nav-field="project"
-          style={{ display: 'flex', 'flex-direction': 'column', gap: '8px' }}
-        >
-          <label
-            style={{
-              'font-size': '11px',
-              color: theme.fgMuted,
-              'text-transform': 'uppercase',
-              'letter-spacing': '0.05em',
-            }}
-          >
-            Project
-          </label>
-          <div
-            ref={projectMenuRef}
-            style={{ position: 'relative', display: 'flex', 'align-items': 'center' }}
-          >
-            <button
-              type="button"
-              class="new-task-project-trigger"
-              role="combobox"
-              aria-expanded={projectMenuOpen()}
-              aria-haspopup="listbox"
-              onClick={() => setProjectMenuOpen((open) => !open)}
-              onKeyDown={handleProjectMenuKeyDown}
-              style={{
-                width: '100%',
-                background: 'transparent',
-                border: `1px solid ${theme.border}`,
-                'border-radius': '8px',
-                padding: '10px 34px 10px 12px',
-                color: theme.fg,
-                'font-size': '13px',
-                outline: 'none',
-                display: 'flex',
-                'align-items': 'center',
-                'justify-content': 'space-between',
-                gap: '10px',
-                cursor: 'pointer',
-                'text-align': 'left',
-              }}
-            >
-              <span
-                style={{
-                  display: 'flex',
-                  'align-items': 'center',
-                  gap: '8px',
-                  overflow: 'hidden',
-                  'min-width': '0',
-                }}
-              >
-                <Show when={selectedProject()}>
-                  {(project) => (
-                    <span
-                      style={{
-                        width: '10px',
-                        height: '10px',
-                        'border-radius': '50%',
-                        background: project().color,
-                        'flex-shrink': '0',
-                      }}
-                    />
-                  )}
-                </Show>
-                <span
-                  style={{
-                    overflow: 'hidden',
-                    'text-overflow': 'ellipsis',
-                    'white-space': 'nowrap',
-                  }}
-                >
-                  {(() => {
-                    const p = selectedProject();
-                    return p ? `${p.name} — ${p.path}` : 'Select a project';
-                  })()}
-                </span>
-              </span>
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="none"
-                style={{
-                  color: theme.fgMuted,
-                  'flex-shrink': '0',
-                  transform: projectMenuOpen() ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.14s ease',
-                }}
-                aria-hidden="true"
-              >
-                <path
-                  d="M3.5 6.5 8 11l4.5-4.5"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-
-            <Show when={projectMenuOpen()}>
-              <div
-                role="listbox"
-                style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 6px)',
-                  left: '0',
-                  right: '0',
-                  background: theme.bgElevated,
-                  border: `1px solid ${theme.border}`,
-                  'border-radius': '8px',
-                  'box-shadow': '0 12px 30px rgba(0,0,0,0.4)',
-                  padding: '4px',
-                  'z-index': '20',
-                  'max-height': '180px',
-                  overflow: 'auto',
-                }}
-              >
-                <For each={store.projects}>
-                  {(project, index) => {
-                    const isSelected = () => selectedProjectId() === project.id;
-                    const isHighlighted = () => highlightedProjectIndex() === index();
-                    return (
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={isSelected()}
-                        class={`new-task-project-option${isSelected() ? ' selected' : ''}${isHighlighted() ? ' highlighted' : ''}`}
-                        onClick={() => {
-                          setSelectedProjectId(project.id);
-                          setProjectMenuOpen(false);
-                        }}
-                        onPointerEnter={() => setHighlightedProjectIndex(index())}
-                        style={{
-                          width: '100%',
-                          border: `1px solid ${isSelected() ? 'color-mix(in srgb, var(--accent) 70%, transparent)' : 'transparent'}`,
-                          'border-radius': '6px',
-                          padding: '8px 10px',
-                          display: 'flex',
-                          'align-items': 'center',
-                          gap: '8px',
-                          background: isHighlighted()
-                            ? isSelected()
-                              ? 'color-mix(in srgb, var(--accent) 16%, transparent)'
-                              : 'color-mix(in srgb, var(--accent) 8%, transparent)'
-                            : isSelected()
-                              ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
-                              : 'transparent',
-                          color: theme.fg,
-                          cursor: 'pointer',
-                          'text-align': 'left',
-                          'font-size': '12px',
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: '9px',
-                            height: '9px',
-                            'border-radius': '50%',
-                            background: project.color,
-                            'flex-shrink': '0',
-                          }}
-                        />
-                        <span
-                          style={{
-                            overflow: 'hidden',
-                            'text-overflow': 'ellipsis',
-                            'white-space': 'nowrap',
-                          }}
-                        >
-                          {project.name} — {project.path}
-                        </span>
-                      </button>
-                    );
-                  }}
-                </For>
-              </div>
-            </Show>
-          </div>
-        </div>
-
-        <div
-          data-nav-field="agent"
-          style={{ display: 'flex', 'flex-direction': 'column', gap: '8px' }}
-        >
-          <label
-            style={{
-              'font-size': '11px',
-              color: theme.fgMuted,
-              'text-transform': 'uppercase',
-              'letter-spacing': '0.05em',
-            }}
-          >
-            Agent
-          </label>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <For each={store.availableAgents}>
-              {(agent) => {
-                const isSelected = () => selectedAgent()?.id === agent.id;
-                return (
-                  <button
-                    type="button"
-                    class={`agent-btn ${isSelected() ? 'selected' : ''}`}
-                    onClick={() => setSelectedAgent(agent)}
-                    style={{
-                      flex: '1',
-                      padding: '10px 8px',
-                      background: isSelected() ? theme.bgSelected : theme.bgInput,
-                      border: isSelected()
-                        ? `1px solid ${theme.accent}`
-                        : `1px solid ${theme.border}`,
-                      'border-radius': '8px',
-                      color: isSelected()
-                        ? store.themePreset === 'graphite' || store.themePreset === 'minimal'
-                          ? '#ffffff'
-                          : theme.accentText
-                        : theme.fg,
-                      cursor: 'pointer',
-                      'font-size': '12px',
-                      'font-weight': isSelected() ? '500' : '400',
-                      'text-align': 'center',
-                    }}
-                  >
-                    {agent.name}
-                  </button>
-                );
-              }}
-            </For>
-          </div>
-        </div>
+        <AgentSelector
+          agents={store.availableAgents}
+          selectedAgent={selectedAgent()}
+          onSelect={setSelectedAgent}
+        />
 
         {/* Shell selector — only shown on Windows with multiple shells available */}
         <Show when={store.availableShells.length > 1}>
@@ -984,65 +649,16 @@ export function NewTaskDialog(props: NewTaskDialogProps) {
         </Show>
 
         <Show when={ignoredDirs().length > 0 && !directMode()}>
-          <div
-            data-nav-field="symlink-dirs"
-            style={{ display: 'flex', 'flex-direction': 'column', gap: '8px' }}
-          >
-            <label
-              style={{
-                'font-size': '11px',
-                color: theme.fgMuted,
-                'text-transform': 'uppercase',
-                'letter-spacing': '0.05em',
-              }}
-            >
-              Symlink into worktree
-            </label>
-            <div
-              style={{
-                display: 'flex',
-                'flex-direction': 'column',
-                gap: '4px',
-                padding: '8px 10px',
-                background: theme.bgElevated,
-                'border-radius': '6px',
-                border: `1px solid ${theme.border}`,
-              }}
-            >
-              <For each={ignoredDirs()}>
-                {(dir) => {
-                  const checked = () => selectedDirs().has(dir);
-                  const toggle = () => {
-                    const next = new Set(selectedDirs());
-                    if (next.has(dir)) next.delete(dir);
-                    else next.add(dir);
-                    setSelectedDirs(next);
-                  };
-                  return (
-                    <label
-                      style={{
-                        display: 'flex',
-                        'align-items': 'center',
-                        gap: '8px',
-                        'font-size': '12px',
-                        'font-family': "'JetBrains Mono', monospace",
-                        color: theme.fg,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked()}
-                        onChange={toggle}
-                        style={{ 'accent-color': theme.accent }}
-                      />
-                      {dir}/
-                    </label>
-                  );
-                }}
-              </For>
-            </div>
-          </div>
+          <SymlinkDirPicker
+            dirs={ignoredDirs()}
+            selectedDirs={selectedDirs()}
+            onToggle={(dir) => {
+              const next = new Set(selectedDirs());
+              if (next.has(dir)) next.delete(dir);
+              else next.add(dir);
+              setSelectedDirs(next);
+            }}
+          />
         </Show>
 
         <Show when={error()}>

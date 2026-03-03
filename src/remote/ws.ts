@@ -30,12 +30,15 @@ export function connect(): void {
   if (!token) return;
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${window.location.host}/ws?token=${token}`;
+  const url = `${protocol}//${window.location.host}/ws`;
 
   setStatus('connecting');
   ws = new WebSocket(url);
 
   ws.onopen = () => {
+    // Authenticate via first message instead of URL query to avoid
+    // token leaking in proxy logs or browser history.
+    send({ type: 'auth', token });
     setStatus('connected');
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -124,8 +127,12 @@ export function unsubscribeAgent(agentId: string): void {
 }
 
 export function onOutput(agentId: string, fn: OutputListener): () => void {
-  if (!outputListeners.has(agentId)) outputListeners.set(agentId, new Set());
-  outputListeners.get(agentId)!.add(fn);
+  let listeners = outputListeners.get(agentId);
+  if (!listeners) {
+    listeners = new Set();
+    outputListeners.set(agentId, listeners);
+  }
+  listeners.add(fn);
   return () => {
     const set = outputListeners.get(agentId);
     set?.delete(fn);
@@ -134,8 +141,12 @@ export function onOutput(agentId: string, fn: OutputListener): () => void {
 }
 
 export function onScrollback(agentId: string, fn: ScrollbackListener): () => void {
-  if (!scrollbackListeners.has(agentId)) scrollbackListeners.set(agentId, new Set());
-  scrollbackListeners.get(agentId)!.add(fn);
+  let listeners = scrollbackListeners.get(agentId);
+  if (!listeners) {
+    listeners = new Set();
+    scrollbackListeners.set(agentId, listeners);
+  }
+  listeners.add(fn);
   return () => {
     const set = scrollbackListeners.get(agentId);
     set?.delete(fn);

@@ -14,6 +14,7 @@ export interface Project {
   color: string;
   branchPrefix?: string; // default "task" if unset
   deleteBranchOnClose?: boolean; // default true if unset
+  defaultDirectMode?: boolean; // default false if unset
   terminalBookmarks?: TerminalBookmark[];
 }
 
@@ -48,6 +49,8 @@ export interface Task {
   skipPermissions?: boolean;
   githubUrl?: string;
   shellType?: ShellType;
+  collapsed?: boolean;
+  savedAgentDef?: AgentDef;
 }
 
 export interface Terminal {
@@ -72,6 +75,7 @@ export interface PersistedTask {
   skipPermissions?: boolean;
   githubUrl?: string;
   savedInitialPrompt?: string;
+  collapsed?: boolean;
 }
 
 export interface PersistedTerminal {
@@ -92,6 +96,7 @@ export interface PersistedState {
   lastProjectId: string | null;
   lastAgentId: string | null;
   taskOrder: string[];
+  collapsedTaskOrder?: string[];
   tasks: Record<string, PersistedTask>;
   terminals?: Record<string, PersistedTerminal>;
   activeTaskId: string | null;
@@ -108,6 +113,8 @@ export interface PersistedState {
   windowState?: PersistedWindowState;
   autoTrustFolders?: boolean;
   inactiveColumnOpacity?: number;
+  editorCommand?: string;
+  customAgents?: AgentDef[];
 }
 
 // Panel cell IDs. Shell terminals use "shell:0", "shell:1", etc.
@@ -136,6 +143,7 @@ export interface AppStore {
   lastProjectId: string | null;
   lastAgentId: string | null;
   taskOrder: string[];
+  collapsedTaskOrder: string[];
   tasks: Record<string, Task>;
   terminals: Record<string, Terminal>;
   agents: Record<string, Agent>;
@@ -143,6 +151,7 @@ export interface AppStore {
   activeAgentId: string | null;
   availableAgents: AgentDef[];
   availableShells: ShellOption[];
+  customAgents: AgentDef[];
   showNewTaskDialog: boolean;
   sidebarVisible: boolean;
   fontScales: Record<string, number>;
@@ -168,6 +177,10 @@ export interface AppStore {
   windowState: PersistedWindowState | null;
   autoTrustFolders: boolean;
   inactiveColumnOpacity: number;
+  editorCommand: string;
   newTaskDropUrl: string | null;
+  newTaskPrefillPrompt: { prompt: string; projectId: string | null } | null;
+  missingProjectIds: Record<string, true>;
   remoteAccess: RemoteAccess;
+  showArena: boolean;
 }

@@ -1,6 +1,6 @@
 {
   "name": "parallel-code",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "",
   "author": {
     "name": "Johannes Millan",
@@ -23,16 +23,15 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm run format:check",
     "release": "npm run typecheck && npm version patch && git push --follow-tags",
-    "prepare": "husky"
+    "prepare": "husky && git config core.hooksPath .husky"
   },
   "license": "MIT",
   "dependencies": {
-    "@git-diff-view/core": "^0.0.39",
-    "@git-diff-view/solid": "^0.0.12",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.55.1",
     "node-pty": "^1.1.0",
     "qrcode": "^1.5.4",
     "solid-js": "^1.9.11",
@@ -61,7 +60,11 @@
     "wait-on": "^9.0.4"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,cjs,json,md,html,css}": "prettier --write"
+    "*.{ts,tsx}": [
+      "eslint --max-warnings 0",
+      "prettier --write"
+    ],
+    "*.{js,cjs,json,md,html,css}": "prettier --write"
   },
   "build": {
     "appId": "com.parallel-code.app",

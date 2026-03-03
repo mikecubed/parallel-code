@@ -1,5 +1,7 @@
 import { produce } from 'solid-js/store';
 import { openDialog } from '../lib/dialog';
+import { invoke } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
 import { store, setStore } from './core';
 import { closeTask } from './tasks';
 import type { Project } from './types';
@@ -36,6 +38,7 @@ export function removeProject(projectId: string): void {
       if (s.lastProjectId === projectId) {
         s.lastProjectId = s.projects[0]?.id ?? null;
       }
+      delete s.missingProjectIds[projectId];
     }),
   );
 }
@@ -43,7 +46,15 @@ export function removeProject(projectId: string): void {
 export function updateProject(
   projectId: string,
   updates: Partial<
-    Pick<Project, 'name' | 'color' | 'branchPrefix' | 'deleteBranchOnClose' | 'terminalBookmarks'>
+    Pick<
+      Project,
+      | 'name'
+      | 'color'
+      | 'branchPrefix'
+      | 'deleteBranchOnClose'
+      | 'defaultDirectMode'
+      | 'terminalBookmarks'
+    >
   >,
 ): void {
   setStore(
@@ -56,6 +67,8 @@ export function updateProject(
         s.projects[idx].branchPrefix = sanitizeBranchPrefix(updates.branchPrefix);
       if (updates.deleteBranchOnClose !== undefined)
         s.projects[idx].deleteBranchOnClose = updates.deleteBranchOnClose;
+      if (updates.defaultDirectMode !== undefined)
+        s.projects[idx].defaultDirectMode = updates.defaultDirectMode;
       if (updates.terminalBookmarks !== undefined)
         s.projects[idx].terminalBookmarks = updates.terminalBookmarks;
     }),
@@ -74,6 +87,9 @@ export function getProjectPath(projectId: string): string | undefined {
 export async function removeProjectWithTasks(projectId: string): Promise<void> {
   // Collect task IDs belonging to this project BEFORE removing anything
   const taskIds = store.taskOrder.filter((tid) => store.tasks[tid]?.projectId === projectId);
+  const collapsedTaskIds = store.collapsedTaskOrder.filter(
+    (tid) => store.tasks[tid]?.projectId === projectId,
+  );
 
   // Close tasks sequentially to avoid concurrent git operations on the same repo.
   // Must happen before removeProject() since closeTask needs the project path.
@@ -81,9 +97,13 @@ export async function removeProjectWithTasks(projectId: string): Promise<void> {
     // closeTask handles and stores its own errors, so this should not throw.
     await closeTask(tid);
   }
+  for (const tid of collapsedTaskIds) {
+    await closeTask(tid);
+  }
 
   // If any tasks failed to close, keep the project so users can retry.
-  const hasRemainingTasks = taskIds.some((tid) => store.tasks[tid]?.projectId === projectId);
+  const allTaskIds = [...taskIds, ...collapsedTaskIds];
+  const hasRemainingTasks = allTaskIds.some((tid) => store.tasks[tid]?.projectId === projectId);
   if (hasRemainingTasks) return;
 
   // Now remove the project itself
@@ -97,4 +117,47 @@ export async function pickAndAddProject(): Promise<string | null> {
   const segments = path.split('/');
   const name = segments[segments.length - 1] || path;
   return addProject(name, path);
+}
+
+/** Check each project path and record which ones are missing. */
+export async function validateProjectPaths(): Promise<void> {
+  const missing: Record<string, true> = {};
+  for (const project of store.projects) {
+    try {
+      const exists = await invoke<boolean>(IPC.CheckPathExists, { path: project.path });
+      if (!exists) missing[project.id] = true;
+    } catch {
+      missing[project.id] = true;
+    }
+  }
+  setStore('missingProjectIds', missing);
+}
+
+/** Let the user pick a new folder for a project whose path is missing. */
+export async function relinkProject(projectId: string): Promise<boolean> {
+  const selected = await openDialog({ directory: true, multiple: false });
+  if (!selected) return false;
+  const newPath = selected as string;
+
+  setStore(
+    produce((s) => {
+      const idx = s.projects.findIndex((p) => p.id === projectId);
+      if (idx === -1) return;
+      s.projects[idx].path = newPath;
+    }),
+  );
+
+  const exists = await invoke<boolean>(IPC.CheckPathExists, { path: newPath });
+  if (exists) {
+    setStore('missingProjectIds', (prev: Record<string, true>) => {
+      const next = { ...prev };
+      delete next[projectId];
+      return next;
+    });
+  }
+  return exists;
+}
+
+export function isProjectMissing(projectId: string): boolean {
+  return projectId in store.missingProjectIds;
 }

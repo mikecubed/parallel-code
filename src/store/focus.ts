@@ -59,7 +59,7 @@ function buildGrid(panelId: string): string[][] {
 
 /** The panel to focus when navigating into a task or terminal. */
 function defaultPanelFor(panelId: string): string {
-  return store.tasks[panelId] ? 'prompt' : 'terminal';
+  return store.tasks[panelId] ? 'ai-terminal' : 'terminal';
 }
 
 interface GridPos {
@@ -89,7 +89,7 @@ export function setTaskFocusedPanel(taskId: string, panel: string): void {
 
 function scrollTaskIntoView(taskId: string): void {
   requestAnimationFrame(() => {
-    const el = document.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`);
+    const el = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
   });
 }
@@ -254,6 +254,7 @@ export function navigateColumn(direction: 'left' | 'right'): void {
   // Cross task boundary
   const { taskOrder } = store;
   const taskIdx = taskOrder.indexOf(taskId);
+  const isCurrentTerminal = !store.tasks[taskId];
 
   if (direction === 'left') {
     if (taskIdx === 0) {
@@ -262,7 +263,10 @@ export function navigateColumn(direction: 'left' | 'right'): void {
     }
     const prevTaskId = taskOrder[taskIdx - 1];
     if (prevTaskId) {
-      if (!store.tasks[prevTaskId]) {
+      if (isCurrentTerminal && store.tasks[prevTaskId]) {
+        // Terminal → Task: restore last focused panel
+        focusTaskPanel(prevTaskId, getTaskFocusedPanel(prevTaskId));
+      } else if (!store.tasks[prevTaskId]) {
         focusTaskPanel(prevTaskId, defaultPanelFor(prevTaskId));
       } else {
         const prevGrid = buildGrid(prevTaskId);
@@ -276,7 +280,10 @@ export function navigateColumn(direction: 'left' | 'right'): void {
   } else {
     const nextTaskId = taskOrder[taskIdx + 1];
     if (nextTaskId) {
-      if (!store.tasks[nextTaskId]) {
+      if (isCurrentTerminal && store.tasks[nextTaskId]) {
+        // Terminal → Task: restore last focused panel
+        focusTaskPanel(nextTaskId, getTaskFocusedPanel(nextTaskId));
+      } else if (!store.tasks[nextTaskId]) {
         focusTaskPanel(nextTaskId, defaultPanelFor(nextTaskId));
       } else {
         const nextGrid = buildGrid(nextTaskId);

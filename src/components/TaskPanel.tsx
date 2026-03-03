@@ -1,6 +1,6 @@
 import { Show, For, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import { revealItemInDir } from '../lib/shell';
+import { revealItemInDir, openInEditor } from '../lib/shell';
 import {
   store,
   retryCloseTask,
@@ -10,6 +10,7 @@ import {
   updateTaskName,
   updateTaskNotes,
   spawnShellForTask,
+  runBookmarkInTask,
   closeShell,
   setLastPrompt,
   clearInitialPrompt,
@@ -24,6 +25,8 @@ import {
   setTaskFocusedPanel,
   triggerFocus,
   clearPendingAction,
+  showNotification,
+  collapseTask,
 } from '../store/store';
 import { ResizablePanel, type PanelChild } from './ResizablePanel';
 import { EditableText, type EditableTextHandle } from './EditableText';
@@ -34,11 +37,14 @@ import { ChangedFilesList } from './ChangedFilesList';
 import { StatusDot } from './StatusDot';
 import { TerminalView } from './TerminalView';
 import { ScalablePanel } from './ScalablePanel';
-import { TaskDialogs } from './TaskDialogs';
+import { CloseTaskDialog } from './CloseTaskDialog';
+import { MergeDialog } from './MergeDialog';
+import { PushDialog } from './PushDialog';
+import { DiffViewerDialog } from './DiffViewerDialog';
 import { EditProjectDialog } from './EditProjectDialog';
 import { theme } from '../lib/theme';
 import { sf } from '../lib/fontScale';
-import { mod } from '../lib/platform';
+import { mod, isMac } from '../lib/platform';
 import { extractLabel, consumePendingShellCommand } from '../lib/bookmarks';
 import { handleDragReorder } from '../lib/dragReorder';
 import type { Task } from '../store/types';
@@ -285,6 +291,15 @@ export function TaskPanel(props: TaskPanelProps) {
             <IconButton
               icon={
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2 8a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8Z" />
+                </svg>
+              }
+              onClick={() => collapseTask(props.task.id)}
+              title="Collapse task"
+            />
+            <IconButton
+              icon={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
                 </svg>
               }
@@ -304,8 +319,22 @@ export function TaskPanel(props: TaskPanelProps) {
       fixed: true,
       content: () => (
         <InfoBar
-          title={props.task.worktreePath}
-          onClick={() => revealItemInDir(props.task.worktreePath).catch(() => {})}
+          title={
+            store.editorCommand
+              ? `Click to open in ${store.editorCommand} · ${isMac ? 'Cmd' : 'Ctrl'}+Click to reveal in file manager`
+              : props.task.worktreePath
+          }
+          onClick={(e?: MouseEvent) => {
+            if (store.editorCommand && !(e && (e.ctrlKey || e.metaKey))) {
+              openInEditor(store.editorCommand, props.task.worktreePath).catch((err) =>
+                showNotification(
+                  `Editor failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+                ),
+              );
+            } else {
+              revealItemInDir(props.task.worktreePath).catch(() => {});
+            }
+          }}
         >
           {(() => {
             const project = getProject(props.task.projectId);
@@ -568,7 +597,7 @@ export function TaskPanel(props: TaskPanelProps) {
                     spawnShellForTask(props.task.id);
                   } else {
                     const bm = projectBookmarks()[idx - 1];
-                    if (bm) spawnShellForTask(props.task.id, bm.command);
+                    if (bm) runBookmarkInTask(props.task.id, bm.command);
                   }
                 }
               }}
@@ -614,7 +643,7 @@ export function TaskPanel(props: TaskPanelProps) {
                     class="icon-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      spawnShellForTask(props.task.id, bookmark.command);
+                      runBookmarkInTask(props.task.id, bookmark.command);
                     }}
                     tabIndex={-1}
                     title={bookmark.command}
@@ -725,6 +754,7 @@ export function TaskPanel(props: TaskPanelProps) {
                         <TerminalView
                           taskId={props.task.id}
                           agentId={shellId}
+                          isShell
                           isFocused={
                             props.isActive && store.focusedPanel[props.task.id] === `shell:${i()}`
                           }
@@ -733,6 +763,7 @@ export function TaskPanel(props: TaskPanelProps) {
                           cwd={props.task.worktreePath}
                           shellType={props.task.shellType}
                           initialCommand={initialCommand}
+                          onData={(data) => markAgentOutput(shellId, data, props.task.id)}
                           onExit={(info) =>
                             setShellExits(shellId, {
                               exitCode: info.exit_code,
@@ -803,6 +834,7 @@ export function TaskPanel(props: TaskPanelProps) {
                     <Show when={a().status === 'exited'}>
                       <div
                         class="exit-badge"
+                        title={a().lastOutput.length ? a().lastOutput.join('\n') : undefined}
                         style={{
                           position: 'absolute',
                           top: '8px',
@@ -819,7 +851,11 @@ export function TaskPanel(props: TaskPanelProps) {
                           gap: '8px',
                         }}
                       >
-                        <span>Process exited ({a().exitCode ?? '?'})</span>
+                        <span>
+                          {a().signal === 'spawn_failed'
+                            ? 'Failed to start'
+                            : `Process exited (${a().exitCode ?? '?'})`}
+                        </span>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1008,20 +1044,27 @@ export function TaskPanel(props: TaskPanelProps) {
           promptInput(),
         ]}
       />
-      <TaskDialogs
+      <CloseTaskDialog
+        open={showCloseConfirm()}
         task={props.task}
-        showCloseConfirm={showCloseConfirm()}
-        onCloseConfirmDone={() => setShowCloseConfirm(false)}
-        showMergeConfirm={showMergeConfirm()}
+        onDone={() => setShowCloseConfirm(false)}
+      />
+      <MergeDialog
+        open={showMergeConfirm()}
+        task={props.task}
         initialCleanup={getProject(props.task.projectId)?.deleteBranchOnClose ?? true}
-        onMergeConfirmDone={() => setShowMergeConfirm(false)}
-        showPushConfirm={showPushConfirm()}
-        onPushStart={() => {
+        onDone={() => setShowMergeConfirm(false)}
+        onDiffFileClick={setDiffFile}
+      />
+      <PushDialog
+        open={showPushConfirm()}
+        task={props.task}
+        onStart={() => {
           setPushing(true);
           setPushSuccess(false);
           clearTimeout(pushSuccessTimer);
         }}
-        onPushConfirmDone={(success) => {
+        onDone={(success) => {
           setShowPushConfirm(false);
           setPushing(false);
           if (success) {
@@ -1029,9 +1072,11 @@ export function TaskPanel(props: TaskPanelProps) {
             pushSuccessTimer = setTimeout(() => setPushSuccess(false), 3000);
           }
         }}
-        diffFile={diffFile()}
-        onDiffClose={() => setDiffFile(null)}
-        onDiffFileClick={setDiffFile}
+      />
+      <DiffViewerDialog
+        file={diffFile()}
+        worktreePath={props.task.worktreePath}
+        onClose={() => setDiffFile(null)}
       />
       <EditProjectDialog project={editingProject()} onClose={() => setEditingProjectId(null)} />
     </div>

@@ -1,3 +1,5 @@
+import { execFileSync } from 'child_process';
+
 interface AgentDef {
   id: string;
   name: string;
@@ -6,6 +8,7 @@ interface AgentDef {
   resume_args: string[];
   skip_permissions_args: string[];
   description: string;
+  available?: boolean;
 }
 
 const DEFAULT_AGENTS: AgentDef[] = [
@@ -37,6 +40,15 @@ const DEFAULT_AGENTS: AgentDef[] = [
     description: "Google's Gemini CLI agent",
   },
   {
+    id: 'opencode',
+    name: 'OpenCode',
+    command: 'opencode',
+    args: [],
+    resume_args: [],
+    skip_permissions_args: [],
+    description: 'Open source AI coding agent (opencode.ai)',
+  },
+  {
     id: 'copilot',
     name: 'GitHub Copilot',
     command: 'copilot',
@@ -47,8 +59,32 @@ const DEFAULT_AGENTS: AgentDef[] = [
   },
 ];
 
+function isCommandAvailable(command: string): boolean {
+  try {
+    execFileSync('which', [command], { encoding: 'utf8', timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// TTL cache to avoid blocking the main thread with repeated `which` calls
+let cachedAgents: AgentDef[] | null = null;
+let cacheTime = 0;
+const AGENT_CACHE_TTL = 30_000;
+
 export function listAgents(): AgentDef[] {
-  return DEFAULT_AGENTS;
+  const now = Date.now();
+  if (cachedAgents && now - cacheTime < AGENT_CACHE_TTL) {
+    return cachedAgents;
+  }
+
+  cachedAgents = DEFAULT_AGENTS.map((agent) => ({
+    ...agent,
+    available: isCommandAvailable(agent.command),
+  }));
+  cacheTime = now;
+  return cachedAgents;
 }
 
 export interface ShellOption {

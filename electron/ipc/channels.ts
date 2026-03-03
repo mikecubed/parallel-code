@@ -17,7 +17,9 @@ export enum IPC {
 
   // Git
   GetChangedFiles = 'get_changed_files',
+  GetChangedFilesFromBranch = 'get_changed_files_from_branch',
   GetFileDiff = 'get_file_diff',
+  GetFileDiffFromBranch = 'get_file_diff_from_branch',
   GetGitignoredDirs = 'get_gitignored_dirs',
   GetWorktreeStatus = 'get_worktree_status',
   CheckMergeStatus = 'check_merge_status',
@@ -27,6 +29,8 @@ export enum IPC {
   RebaseTask = 'rebase_task',
   GetMainBranch = 'get_main_branch',
   GetCurrentBranch = 'get_current_branch',
+  CommitAll = 'commit_all',
+  DiscardUncommitted = 'discard_uncommitted',
 
   // Persistence
   SaveAppState = 'save_app_state',
@@ -58,6 +62,15 @@ export enum IPC {
 
   // Shell
   ShellReveal = '__shell_reveal',
+  ShellOpenFile = '__shell_open_file',
+  ShellOpenInEditor = '__shell_open_in_editor',
+
+  // Arena
+  SaveArenaData = 'save_arena_data',
+  LoadArenaData = 'load_arena_data',
+  CreateArenaWorktree = 'create_arena_worktree',
+  RemoveArenaWorktree = 'remove_arena_worktree',
+  CheckPathExists = 'check_path_exists',
 
   // Remote access
   StartRemoteServer = 'start_remote_server',

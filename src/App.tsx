@@ -21,6 +21,7 @@ import {
   saveState,
   toggleNewTaskDialog,
   toggleSidebar,
+  toggleArena,
   moveActiveTask,
   getGlobalScale,
   adjustGlobalScale,
@@ -41,6 +42,7 @@ import {
   createTerminal,
   closeTerminal,
   setNewTaskDropUrl,
+  validateProjectPaths,
 } from './store/store';
 import { isGitHubUrl } from './lib/github-url';
 import type { PersistedWindowState } from './store/types';
@@ -48,6 +50,7 @@ import { registerShortcut, initShortcuts } from './lib/shortcuts';
 import { setupAutosave } from './store/autosave';
 import { isMac, mod } from './lib/platform';
 import { createCtrlWheelZoomHandler } from './lib/wheelZoom';
+import { ArenaOverlay } from './arena/ArenaOverlay';
 
 const MIN_WINDOW_DIMENSION = 100;
 
@@ -276,9 +279,14 @@ function App() {
         unlistenResized = null;
       }
 
+      let moveTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         unlistenMoved = await appWindow.onMoved(() => {
-          void captureWindowState();
+          if (moveTimer !== undefined) clearTimeout(moveTimer);
+          moveTimer = setTimeout(() => {
+            moveTimer = undefined;
+            void captureWindowState();
+          }, 200);
         });
       } catch {
         unlistenMoved = null;
@@ -288,6 +296,7 @@ function App() {
     await loadAgents();
     await loadShells();
     await loadState();
+    await validateProjectPaths();
     await restoreWindowState();
     await captureWindowState();
     setupAutosave();
@@ -515,6 +524,9 @@ function App() {
       key: 'Escape',
       dialogSafe: true,
       handler: () => {
+        if (store.showArena) {
+          return;
+        }
         if (store.showHelpDialog) {
           toggleHelpDialog(false);
           return;
@@ -679,6 +691,9 @@ function App() {
           open={store.showSettingsDialog}
           onClose={() => toggleSettingsDialog(false)}
         />
+        <Show when={store.showArena}>
+          <ArenaOverlay onClose={() => toggleArena(false)} />
+        </Show>
         <Show when={showDropOverlay()}>
           <DropOverlay />
         </Show>

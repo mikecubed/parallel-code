@@ -46,6 +46,7 @@ interface TerminalViewProps {
   cwd: string;
   env?: Record<string, string>;
   shellType?: ShellType;
+  isShell?: boolean;
   onExit?: (exitInfo: {
     exit_code: number | null;
     signal: string | null;
@@ -54,6 +55,7 @@ interface TerminalViewProps {
   onData?: (data: Uint8Array) => void;
   onPromptDetected?: (text: string) => void;
   onReady?: (focusFn: () => void) => void;
+  onBufferReady?: (getBuffer: () => string) => void;
   fontSize?: number;
   autoFocus?: boolean;
   initialCommand?: string;
@@ -87,10 +89,33 @@ export function TerminalView(props: TerminalViewProps) {
 
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        try {
+          const parsed = new URL(uri);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            window.open(uri, '_blank');
+          }
+        } catch {
+          // Invalid URL, ignore
+        }
+      }),
+    );
 
     term.open(containerRef);
-    props.onReady?.(() => term!.focus());
+    props.onReady?.(() => term?.focus());
+    props.onBufferReady?.(() => {
+      if (!term) return '';
+      const buf = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i <= buf.length - 1; i++) {
+        const line = buf.getLine(i);
+        if (line) lines.push(line.translateToString(true));
+      }
+      // Trim trailing empty lines
+      while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+      return lines.join('\n');
+    });
 
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== 'keydown') return true;
@@ -106,7 +131,7 @@ export function TerminalView(props: TerminalViewProps) {
         : e.ctrlKey && e.shiftKey && e.key === 'V';
 
       if (isCopy) {
-        const sel = term!.getSelection();
+        const sel = term?.getSelection();
         if (sel) navigator.clipboard.writeText(sel);
         return false;
       }
@@ -178,6 +203,7 @@ export function TerminalView(props: TerminalViewProps) {
           : payload;
 
       outputWriteInFlight = true;
+      // eslint-disable-next-line solid/reactivity -- write callback is not a reactive context
       term.write(payload, () => {
         outputWriteInFlight = false;
         watermark = Math.max(watermark - payload.length, 0);
@@ -238,8 +264,9 @@ export function TerminalView(props: TerminalViewProps) {
       if (msg.type === 'Data') {
         enqueueOutput(base64ToUint8Array(msg.data));
         if (!initialCommandSent && props.initialCommand) {
+          const cmd = props.initialCommand;
           initialCommandSent = true;
-          setTimeout(() => enqueueInput(props.initialCommand! + '\r'), 50);
+          setTimeout(() => enqueueInput(cmd + '\r'), 50);
         }
       } else if (msg.type === 'Exit') {
         pendingExitPayload = msg.data;
@@ -280,12 +307,13 @@ export function TerminalView(props: TerminalViewProps) {
       }, 8);
     }
 
+    // eslint-disable-next-line solid/reactivity -- event handler reads current prop values intentionally
     term.onData((data) => {
       if (props.onPromptDetected) {
         for (const ch of data) {
           if (ch === '\r') {
             const trimmed = inputBuffer.trim();
-            if (trimmed) props.onPromptDetected!(trimmed);
+            if (trimmed) props.onPromptDetected?.(trimmed);
             inputBuffer = '';
           } else if (ch === '\x7f') {
             inputBuffer = inputBuffer.slice(0, -1);
@@ -356,12 +384,14 @@ export function TerminalView(props: TerminalViewProps) {
       shellType: props.shellType,
       cols: term.cols,
       rows: term.rows,
+      isShell: props.isShell,
       onOutput,
+      // eslint-disable-next-line solid/reactivity -- promise catch handler reads current prop values intentionally
     }).catch((err) => {
       // Strip control/escape characters to prevent terminal escape injection
       // eslint-disable-next-line no-control-regex -- intentionally stripping control/escape chars to prevent terminal injection
       const safeErr = String(err).replace(/[\x00-\x1f\x7f]/g, '');
-      term!.write(`\x1b[31mFailed to spawn: ${safeErr}\x1b[0m\r\n`);
+      term?.write(`\x1b[31mFailed to spawn: ${safeErr}\x1b[0m\r\n`);
       props.onExit?.({
         exit_code: null,
         signal: 'spawn_failed',
@@ -381,7 +411,7 @@ export function TerminalView(props: TerminalViewProps) {
       unregisterTerminal(agentId);
       // kill_agent already clears paused flag before killing
       invoke(IPC.KillAgent, { agentId });
-      term!.dispose();
+      term?.dispose();
     });
   });
 
