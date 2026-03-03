@@ -67,9 +67,10 @@ export function validateCommand(command: string): void {
       );
     }
   }
-  // Bare names: resolve via `which` (execFileSync — no shell interpolation)
+  // Bare names: resolve via `which` on Unix/WSL, `where.exe` on PowerShell-only Windows
+  const finder = process.platform === 'win32' && !process.env.WSL_DISTRO ? 'where.exe' : 'which';
   try {
-    execFileSync('which', [command], { encoding: 'utf8', timeout: 3000 });
+    execFileSync(finder, [command], { encoding: 'utf8', timeout: 3000 });
   } catch {
     throw new Error(
       `Command '${command}' not found in PATH. Make sure it is installed and available in your terminal.`,

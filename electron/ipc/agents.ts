@@ -60,8 +60,9 @@ const DEFAULT_AGENTS: AgentDef[] = [
 ];
 
 function isCommandAvailable(command: string): boolean {
+  const finder = process.platform === 'win32' && !process.env.WSL_DISTRO ? 'where.exe' : 'which';
   try {
-    execFileSync('which', [command], { encoding: 'utf8', timeout: 3000 });
+    execFileSync(finder, [command], { encoding: 'utf8', timeout: 3000 });
     return true;
   } catch {
     return false;
