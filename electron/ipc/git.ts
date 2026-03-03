@@ -22,6 +22,21 @@ async function rmDirWithRetry(p: string, maxAttempts = 4, baseDelayMs = 250): Pr
       await new Promise<void>((r) => setTimeout(r, baseDelayMs * (i + 1)));
     }
   }
+
+  // fs.rmSync can fail with EPERM on Windows when git has marked .git object
+  // files as read-only. Try PowerShell's Remove-Item which handles this natively.
+  const psExe = process.env.PS_EXE || 'pwsh.exe';
+  try {
+    await execFileRaw(psExe, [
+      '-NoProfile',
+      '-Command',
+      `Remove-Item -Recurse -Force -Path '${p.replace(/'/g, "''")}'`,
+    ]);
+    return;
+  } catch {
+    /* fall through and throw the original error */
+  }
+
   throw lastErr;
 }
 
@@ -368,7 +383,11 @@ export async function createWorktree(
       try {
         await exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot });
       } catch {
-        fs.rmSync(worktreePath, { recursive: true, force: true });
+        if (process.platform === 'win32') {
+          await rmDirWithRetry(fsPath(worktreePath));
+        } else {
+          fs.rmSync(worktreePath, { recursive: true, force: true });
+        }
       }
       await exec('git', ['worktree', 'prune'], { cwd: repoRoot }).catch(() => {});
     }
